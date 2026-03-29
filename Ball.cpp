@@ -27,6 +27,7 @@ void Ball::Draw() {
 //     // 下边界暂时不处理
 // }
 
+// 修改后的 Ball::BounceEdge 函数
 void Ball::BounceEdge(int screenWidth, int screenHeight) {
     // 左右边界
     if (position.x - radius <= 0 || position.x + radius >= screenWidth) {
@@ -36,8 +37,5 @@ void Ball::BounceEdge(int screenWidth, int screenHeight) {
     if (position.y - radius <= 0) {
         speed.y *= -1;
     }
-    // 下边界（新增）
-    if (position.y + radius >= screenHeight) {
-        speed.y *= -1;
-    }
+    // 下边界逻辑已删除，球会掉出屏幕
 }

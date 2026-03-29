@@ -11,6 +11,7 @@ public:
     Brick(float x, float y, float w, float h);
     void Draw();
     bool IsActive() { return active; }
+    Rectangle GetRect() { return rect; }
     void SetActive(bool a) { active = a; }
 };
 
