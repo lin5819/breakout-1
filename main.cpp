@@ -8,6 +8,8 @@ int main() {
     
     // 主循环
     while (!WindowShouldClose() && game.running) {
+        game.ProcessInput();
+        game.CheckCollisions();
         game.UpdateGame();
         game.Render();
     }
