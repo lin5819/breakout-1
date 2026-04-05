@@ -3,11 +3,66 @@
 #include "Ball.h"
 #include "Paddle.h"
 #include "Brick.h"
+#include "nlohmann/json.hpp"
 #include <iostream>
+#include <fstream>
+
+using json = nlohmann::json;
+
+void Game::LoadConfig() {
+    std::ifstream file("config.json"); // 读取同级目录下的文件
+    if (!file.is_open()) {
+        std::cerr << "无法打开 config.json，使用默认值" << std::endl;
+        // 即使文件打不开，构造函数中的默认值也会生效
+        return;
+    }
+
+    try {
+        json data;
+        file >> data;
+
+        // 读取 Window 配置
+        config.screenWidth = data["window"]["width"];
+        config.screenHeight = data["window"]["height"];
+        config.title = data["window"]["title"];
+        config.targetFps = data["window"]["fps"];
+
+        // 读取 Game 配置
+        config.initialLives = data["game"]["initial_lives"];
+
+        // 读取 Ball 配置
+        config.ballRadius = data["ball"]["radius"];
+        config.ballStartSpeedX = data["ball"]["start_speed_x"];
+        config.ballStartSpeedY = data["ball"]["start_speed_y"];
+
+        // 读取 Paddle 配置
+        config.paddleWidth = data["paddle"]["width"];
+        config.paddleHeight = data["paddle"]["height"];
+        config.paddleSpeed = data["paddle"]["speed"];
+
+        // 读取 Bricks 配置
+        config.brickRows = data["bricks"]["rows"];
+        config.brickCols = data["bricks"]["cols"];
+        config.brickWidth = data["bricks"]["width"];
+        config.brickHeight = data["bricks"]["height"];
+        config.brickSpacing = data["bricks"]["spacing"];
+
+        std::cout << "配置加载成功!" << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "配置解析错误: " << e.what() << std::endl;
+    }
+    file.close();
+}
 
 Game::Game(int width, int height) 
-    : screenWidth(width), screenHeight(height), running(true), 
-      lives(5), bricksRemaining(0), ball(nullptr), paddle(nullptr) {
+    : screenWidth(width), screenHeight(height), running(true)
+    , bricksRemaining(0), ball(nullptr), paddle(nullptr) {
+        LoadConfig();
+
+        screenWidth = config.screenWidth;
+    screenHeight = config.screenHeight;
+    lives = config.initialLives;
 
          state = MENU;
 
@@ -26,8 +81,8 @@ Game::~Game() {
 
 void Game::InitWindow() {
     // 只在这里初始化窗口
-    ::InitWindow(screenWidth, screenHeight, "Refactored Brick Breaker");
-    ::SetTargetFPS(60);
+     ::InitWindow(config.screenWidth, config.screenHeight, config.title.c_str());
+    ::SetTargetFPS(config.targetFps);
 }
 
 void Game::ResetGame() {
@@ -36,20 +91,37 @@ void Game::ResetGame() {
     delete paddle;
 
     // 2. 重新创建新对象
-    ball = new Ball({(float)screenWidth/2, (float)screenHeight/2}, {3, 3}, 10);
-    paddle = new Paddle(screenWidth/2 - 50, screenHeight - 50, 100, 20); // 假设挡板宽100
+    ball = new Ball(
+        {(float)screenWidth/2, (float)screenHeight/2}, 
+        {config.ballStartSpeedX, config.ballStartSpeedY}, 
+        config.ballRadius
+    );
+    float paddleX = (screenWidth - config.paddleWidth) / 2;
+    paddle = new Paddle(
+        paddleX, 
+        screenHeight - 50, 
+        config.paddleWidth, 
+        config.paddleHeight,
+        config.paddleSpeed // 传入配置的速度
+    );
 
     // 3. 重置砖块
     bricks.clear();
-    float brickWidth = 90; 
-    float brickHeight = 30;
-    for(int row = 0; row < 5; row++) {
-        for (int col = 0; col < 7; col++) {
-            bricks.emplace_back(20 + col * 110, 50 + row * 50, brickWidth, brickHeight);
+    bricksRemaining = 0;
+    
+    float startX = (screenWidth - (config.brickCols * (config.brickWidth + config.brickSpacing))) / 2;
+    float startY = 50;
+
+    for(int row = 0; row < config.brickRows; row++) {
+        for (int col = 0; col < config.brickCols; col++) {
+            float x = startX + col * (config.brickWidth + config.brickSpacing);
+            float y = startY + row * (config.brickHeight + config.brickSpacing);
+            bricks.emplace_back(x, y, config.brickWidth, config.brickHeight);
         }
     }
+    
     bricksRemaining = bricks.size();
-    lives = 5;
+    lives = config.initialLives; // 重置生命值
 }
 
 void Game::ProcessInput() {
@@ -78,18 +150,22 @@ void Game::ProcessInput() {
                 }
             }
              if (IsKeyPressed(KEY_ESCAPE)) {
-        if (state == PLAYING) state = PAUSED;
-        else if (state == PAUSED) state = PLAYING;
+        state = PLAYING;
     }
             break;
         case PLAYING:
             // 游戏中的移动逻辑 (原来的 ProcessInput 内容)
-            if (IsKeyDown(KEY_LEFT)) paddle->MoveLeft(5);
-            if (IsKeyDown(KEY_RIGHT)) paddle->MoveRight(5);
+            if (IsKeyDown(KEY_LEFT)) paddle->MoveLeft();
+            if (IsKeyDown(KEY_RIGHT)) paddle->MoveRight();
              if (IsKeyPressed(KEY_ESCAPE)) {
-        if (state == PLAYING) state = PAUSED;
-        else if (state == PAUSED) state = PLAYING;
+        state = PAUSED;
     }
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                Vector2 mouse = GetMousePosition();
+                if (CheckCollisionPointRec(mouse, btnPause)) { // 检测是否点击了 btnPause
+                    state = PAUSED;
+                }
+            }
             break;
         case GAMEOVER:
             // 游戏结束输入
@@ -203,9 +279,6 @@ void Game::DrawMenu() {
     
     DrawRectangleRec(btnExit, PINK);
     DrawText("EXIT", 370, 315, 20, DARKBLUE);
-    
-    // 绘制提示
-    DrawText("Click Buttons or Press ESC to Pause", 10, screenHeight - 30, 20, GRAY);
 }
 
 void Game::DrawPlaying() {
@@ -217,12 +290,12 @@ void Game::DrawPlaying() {
     }
     
     // 绘制UI
-    DrawText(TextFormat("HP: %i", lives), 50, 10, 20, RED);
+    DrawText(TextFormat("HP: %i", lives), 60, 10, 20, RED);
     DrawText(TextFormat("Bricks: %i", bricksRemaining), 600, 10, 20, GREEN);
     
     // --- 新增：绘制屏幕左上角的暂停按钮 ---
     DrawRectangleRec(btnPause, GRAY);
-    DrawText("||", 25, 20, 30, WHITE);
+    DrawText("| |", 20, 18, 30, WHITE);
 }
 
 void Game::DrawPaused() {

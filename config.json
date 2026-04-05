@@ -1,0 +1,32 @@
+{
+  "window": {
+    "width": 800,
+    "height": 600,
+    "title": "Configurable Brick Breaker",
+    "fps": 60
+  },
+  "game": {
+    "initial_lives": 3,
+    "victory_bricks_threshold": 0
+  },
+  "ball": {
+    "radius": 10,
+    "start_speed_x": 3,
+    "start_speed_y": 3,
+    "color": "RED"
+  },
+  "paddle": {
+    "width": 100,
+    "height": 20,
+    "speed": 5,
+    "color": "BLUE"
+  },
+  "bricks": {
+    "rows": 5,
+    "cols": 7,
+    "width": 90,
+    "height": 30,
+    "spacing": 20,
+    "color": "GREEN"
+  }
+}

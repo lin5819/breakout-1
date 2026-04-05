@@ -6,11 +6,13 @@
 class Paddle {
 private:
     Rectangle rect;
+    float speed; // 新增成员变量
 public:
-    Paddle(float x, float y, float w, float h);
+    // 修改构造函数，增加 speed 参数
+    Paddle(float x, float y, float w, float h, float s); 
     void Draw();
-    void MoveLeft(float speed);
-    void MoveRight(float speed);
+    void MoveLeft();
+    void MoveRight();
     Rectangle GetRect() { return rect; }
 };
 

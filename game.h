@@ -4,7 +4,36 @@
 
 #include "raylib.h"
 #include <vector>
+#include <string>
 
+
+struct GameConfig {
+    // Window
+    int screenWidth = 800;
+    int screenHeight = 600;
+    std::string title = "Brick Breaker";
+    int targetFps = 60;
+
+    // Game
+    int initialLives = 5;
+
+    // Ball
+    float ballRadius = 10.0f;
+    float ballStartSpeedX = 3.0f;
+    float ballStartSpeedY = 3.0f;
+
+    // Paddle
+    float paddleWidth = 100.0f;
+    float paddleHeight = 20.0f;
+    float paddleSpeed = 5.0f; // 注意：Paddle 类内部逻辑需要支持传入 speed
+
+    // Bricks
+    int brickRows = 5;
+    int brickCols = 7;
+    float brickWidth = 90.0f;
+    float brickHeight = 30.0f;
+    float brickSpacing = 20.0f;
+};
 // 前向声明 (Forward Declarations)，因为我们还没有包含具体的头文件
 // 或者你可以选择在这里 include "Ball.h" "Paddle.h" "Brick.h"
 class Ball;
@@ -16,6 +45,7 @@ enum GameState { MENU, PLAYING, PAUSED, GAMEOVER };
 class Game {
 private:
     GameState state;
+    GameConfig config;
 
     Rectangle btnStart;
     Rectangle btnExit;
@@ -55,6 +85,8 @@ public:
 
     void InitWindow(); // <--- 新增：专门负责窗口初始化
     void ResetGame();  // <--- 新增：专门负责重置球、拍、砖块等数据
+
+     void LoadConfig(); 
 
 
     Game(int width = 800, int height = 600);
