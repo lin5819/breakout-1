@@ -3,7 +3,7 @@
 // File: main.cpp
 int main() {
     Game game(800, 600);
-    game.InitGame(); // 注意：现在的 InitGame 可能只初始化窗口，或者由构造函数处理
+    game.InitWindow(); // 注意：现在的 InitGame 可能只初始化窗口，或者由构造函数处理
     
     while (!WindowShouldClose() && game.running) {
         game.ProcessInput(); // 状态机在此处处理输入

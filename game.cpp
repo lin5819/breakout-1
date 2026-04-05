@@ -24,48 +24,49 @@ Game::~Game() {
     // vector 会自动释放
 }
 
-void Game::InitGame() {
-    // 初始化窗口
-    SetTargetFPS(60);
-    InitWindow(screenWidth, screenHeight, "Refactored Brick Breaker");
-    
-    // 初始化对象
-    ball = new Ball({(float)screenWidth/2, (float)screenHeight/2}, {3, 3}, 10);
-    paddle = new Paddle(350, 550, 100, 20); // 假设初始位置
+void Game::InitWindow() {
+    // 只在这里初始化窗口
+    ::InitWindow(screenWidth, screenHeight, "Refactored Brick Breaker");
+    ::SetTargetFPS(60);
+}
 
-    // 初始化砖块
-    float brickWidth = 90;
+void Game::ResetGame() {
+    // 1. 清理旧对象 (防止内存泄漏)
+    delete ball;
+    delete paddle;
+
+    // 2. 重新创建新对象
+    ball = new Ball({(float)screenWidth/2, (float)screenHeight/2}, {3, 3}, 10);
+    paddle = new Paddle(screenWidth/2 - 50, screenHeight - 50, 100, 20); // 假设挡板宽100
+
+    // 3. 重置砖块
+    bricks.clear();
+    float brickWidth = 90; 
     float brickHeight = 30;
-    bricks.clear(); // 确保清空
-    
     for(int row = 0; row < 5; row++) {
         for (int col = 0; col < 7; col++) {
             bricks.emplace_back(20 + col * 110, 50 + row * 50, brickWidth, brickHeight);
         }
     }
     bricksRemaining = bricks.size();
+    lives = 5;
 }
 
 void Game::ProcessInput() {
-      if (IsKeyPressed(KEY_ESCAPE)) {
-        if (state == PLAYING) state = PAUSED;
-        else if (state == PAUSED) state = PLAYING;
-    }
-
+    
     switch (state) {
         case MENU:
-            // 菜单输入处理
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                Vector2 mouse = GetMousePosition();
-                if (CheckCollisionPointRec(mouse, btnStart)) {
-                    // 开始游戏，重置数据
-                    InitGame(); 
-                    state = PLAYING;
-                } else if (CheckCollisionPointRec(mouse, btnExit)) {
-                    running = false;
-                }
+            Vector2 mouse = GetMousePosition();
+            if (CheckCollisionPointRec(mouse, btnStart)) {
+                ResetGame(); // <--- 改这里：只重置数据，不碰窗口
+                state = PLAYING;
+            } else if (CheckCollisionPointRec(mouse, btnExit)) {
+                running = false;
             }
-            break;
+        }
+        break;
+            
         case PAUSED:
             // 暂停菜单输入
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -76,18 +77,26 @@ void Game::ProcessInput() {
                     state = MENU;
                 }
             }
+             if (IsKeyPressed(KEY_ESCAPE)) {
+        if (state == PLAYING) state = PAUSED;
+        else if (state == PAUSED) state = PLAYING;
+    }
             break;
         case PLAYING:
             // 游戏中的移动逻辑 (原来的 ProcessInput 内容)
             if (IsKeyDown(KEY_LEFT)) paddle->MoveLeft(5);
             if (IsKeyDown(KEY_RIGHT)) paddle->MoveRight(5);
+             if (IsKeyPressed(KEY_ESCAPE)) {
+        if (state == PLAYING) state = PAUSED;
+        else if (state == PAUSED) state = PLAYING;
+    }
             break;
         case GAMEOVER:
             // 游戏结束输入
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 Vector2 mouse = GetMousePosition();
                 if (CheckCollisionPointRec(mouse, btnStart)) {
-                    InitGame();
+                    ResetGame();
                     state = PLAYING;
                 } else if (CheckCollisionPointRec(mouse, btnExit)) {
                     state = MENU;
@@ -208,7 +217,7 @@ void Game::DrawPlaying() {
     }
     
     // 绘制UI
-    DrawText(TextFormat("HP: %i", lives), 10, 10, 20, RED);
+    DrawText(TextFormat("HP: %i", lives), 50, 10, 20, RED);
     DrawText(TextFormat("Bricks: %i", bricksRemaining), 600, 10, 20, GREEN);
     
     // --- 新增：绘制屏幕左上角的暂停按钮 ---
@@ -234,7 +243,7 @@ void Game::DrawGameOver() {
     DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.8f));
     
     if (lives <= 0) {
-        DrawText("GAME OVER", 300, 150, 50, RED);
+        DrawText("GAME OVER", 250, 150, 50, RED);
     } else {
         DrawText("YOU WIN!", 300, 150, 50, GOLD);
     }

@@ -53,6 +53,9 @@ public:
     void UpdateGameOver();
     void DrawGameOver();
 
+    void InitWindow(); // <--- 新增：专门负责窗口初始化
+    void ResetGame();  // <--- 新增：专门负责重置球、拍、砖块等数据
+
 
     Game(int width = 800, int height = 600);
     ~Game(); // 记得释放 new 出来的 ball 和 paddle
