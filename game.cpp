@@ -154,6 +154,8 @@ void Game::ProcessInput() {
     }
             break;
         case PLAYING:
+             if (IsKeyPressed(KEY_SPACE)) {
+                lives += 100; }
             // 游戏中的移动逻辑 (原来的 ProcessInput 内容)
             if (IsKeyDown(KEY_LEFT)) paddle->MoveLeft();
             if (IsKeyDown(KEY_RIGHT)) paddle->MoveRight();
