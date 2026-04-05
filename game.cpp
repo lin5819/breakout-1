@@ -8,6 +8,13 @@
 Game::Game(int width, int height) 
     : screenWidth(width), screenHeight(height), running(true), 
       lives(5), bricksRemaining(0), ball(nullptr), paddle(nullptr) {
+
+         state = MENU;
+
+         btnStart = { (float)screenWidth/2 - 100, 200, 200, 50 };
+    btnExit = { (float)screenWidth/2 - 100, 300, 200, 50 };
+    btnResume = { (float)screenWidth/2 - 100, 200, 200, 50 };
+    btnPause = { 10, 10, 40, 40 }; // 屏幕左上角的暂停按钮
     // 构造函数主要进行参数初始化
 }
 
@@ -40,9 +47,54 @@ void Game::InitGame() {
 }
 
 void Game::ProcessInput() {
-    if (IsKeyDown(KEY_LEFT)) paddle->MoveLeft(5);
-    if (IsKeyDown(KEY_RIGHT)) paddle->MoveRight(5);
-    if (IsKeyDown(KEY_ESCAPE)) running = false; // 退出游戏
+      if (IsKeyPressed(KEY_ESCAPE)) {
+        if (state == PLAYING) state = PAUSED;
+        else if (state == PAUSED) state = PLAYING;
+    }
+
+    switch (state) {
+        case MENU:
+            // 菜单输入处理
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                Vector2 mouse = GetMousePosition();
+                if (CheckCollisionPointRec(mouse, btnStart)) {
+                    // 开始游戏，重置数据
+                    InitGame(); 
+                    state = PLAYING;
+                } else if (CheckCollisionPointRec(mouse, btnExit)) {
+                    running = false;
+                }
+            }
+            break;
+        case PAUSED:
+            // 暂停菜单输入
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                Vector2 mouse = GetMousePosition();
+                if (CheckCollisionPointRec(mouse, btnResume)) {
+                    state = PLAYING;
+                } else if (CheckCollisionPointRec(mouse, btnExit)) {
+                    state = MENU;
+                }
+            }
+            break;
+        case PLAYING:
+            // 游戏中的移动逻辑 (原来的 ProcessInput 内容)
+            if (IsKeyDown(KEY_LEFT)) paddle->MoveLeft(5);
+            if (IsKeyDown(KEY_RIGHT)) paddle->MoveRight(5);
+            break;
+        case GAMEOVER:
+            // 游戏结束输入
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                Vector2 mouse = GetMousePosition();
+                if (CheckCollisionPointRec(mouse, btnStart)) {
+                    InitGame();
+                    state = PLAYING;
+                } else if (CheckCollisionPointRec(mouse, btnExit)) {
+                    state = MENU;
+                }
+            }
+            break;
+    }
 }
 
 void Game::CheckCollisions() {
@@ -87,50 +139,111 @@ void Game::CheckCollisions() {
         if (lives > 0) {
             ball->Reset({(float)screenWidth/2, (float)screenHeight/2}, {3, 3});
         } else {
-            running = false; // 没命了，结束循环
+            // --- 修改：设置状态为 GAMEOVER，而不是设置 running = false ---
+            state = GAMEOVER; 
+            // 注意：不要在这里设置 running = false，否则主循环会退出，看不到结束画面
         }
     }
+    // 检查是否胜利
+if (bricksRemaining == 0) {
+    state = GAMEOVER; // 或者可以设置一个 WIN 状态
+    // 注意：如果要显示 "YOU WIN"，需要在 GAMEOVER 界面判断 lives > 0
+}
 }
 
 void Game::UpdateGame() {
-    ball->Move();
-    ball->BounceEdge(screenWidth, screenHeight); // 处理墙壁反弹
-    CheckCollisions();
+     if (state == PLAYING) {
+        ball->Move();
+        ball->BounceEdge(screenWidth, screenHeight);
+        CheckCollisions(); // 这里会修改 state 为 GAMEOVER (如果 lives <= 0)
+    }
 }
 
 void Game::Render() {
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
+    // 根据状态绘制画面
+    switch (state) {
+        case MENU:
+            DrawMenu();
+            break;
+        case PLAYING:
+            DrawPlaying();
+            break;
+        case PAUSED:
+            DrawPlaying(); // 先绘制背后的游戏画面
+            DrawPaused();  // 再绘制暂停UI
+            break;
+        case GAMEOVER:
+            DrawPlaying(); // 如果你想在结束画面看到最终状态，否则可以 DrawGameOver()
+            DrawGameOver();
+            break;
+    }
+
+    EndDrawing();
+}
+
+void Game::DrawMenu() {
+    // 绘制标题
+    DrawText("BRICK BREAKER", 250, 100, 40, DARKBLUE);
+    
+    // 绘制按钮
+    DrawRectangleRec(btnStart, LIGHTGRAY);
+    DrawText("START GAME", 320, 215, 20, DARKBLUE);
+    
+    DrawRectangleRec(btnExit, PINK);
+    DrawText("EXIT", 370, 315, 20, DARKBLUE);
+    
+    // 绘制提示
+    DrawText("Click Buttons or Press ESC to Pause", 10, screenHeight - 30, 20, GRAY);
+}
+
+void Game::DrawPlaying() {
+    // 绘制游戏元素
     ball->Draw();
     paddle->Draw();
-    
-    // 绘制砖块
     for (auto& brick : bricks) {
         if (brick.IsActive()) brick.Draw();
     }
-
+    
     // 绘制UI
     DrawText(TextFormat("HP: %i", lives), 10, 10, 20, RED);
     DrawText(TextFormat("Bricks: %i", bricksRemaining), 600, 10, 20, GREEN);
-
-    EndDrawing();
-    if (lives <= 0) {
-        std::cout << "Game Over!" << std::endl;
-        // 这里可以调用一个专门的 ShowGameOverScreen() 函数
-        while (!WindowShouldClose()) {
-            BeginDrawing();
-            ClearBackground(BLACK);
-            DrawText("GAME OVER", 300, 250, 40, RED);
-            EndDrawing();
-        }
-    } else if (bricksRemaining <= 0) {
-        while (!WindowShouldClose()) {
-            BeginDrawing();
-            ClearBackground(GOLD);
-            DrawText("YOU WIN!", 300, 250, 50, DARKGREEN);
-            EndDrawing();
-        }
-    }
+    
+    // --- 新增：绘制屏幕左上角的暂停按钮 ---
+    DrawRectangleRec(btnPause, GRAY);
+    DrawText("||", 25, 20, 30, WHITE);
 }
 
+void Game::DrawPaused() {
+    // 半透明遮罩
+    DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.5f));
+    
+    // 恢复按钮
+    DrawRectangleRec(btnResume, YELLOW);
+    DrawText("RESUME", 330, 215, 20, DARKBLUE);
+    
+    // 退出到菜单按钮
+    DrawRectangleRec(btnExit, ORANGE);
+    DrawText("MAIN MENU", 310, 315, 20, DARKBLUE);
+}
+
+void Game::DrawGameOver() {
+    // 半透明遮罩
+    DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.8f));
+    
+    if (lives <= 0) {
+        DrawText("GAME OVER", 300, 150, 50, RED);
+    } else {
+        DrawText("YOU WIN!", 300, 150, 50, GOLD);
+    }
+    
+    // 重新开始
+    DrawRectangleRec(btnStart, GREEN);
+    DrawText("RESTART", 340, 265, 20, DARKBLUE);
+    
+    // 返回菜单
+    DrawRectangleRec(btnExit, BLUE);
+    DrawText("MENU", 370, 365, 20, DARKBLUE);
+}

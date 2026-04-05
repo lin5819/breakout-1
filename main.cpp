@@ -1,24 +1,16 @@
 #include "game.h"
 
+// File: main.cpp
 int main() {
-    // 创建游戏实例并运行
     Game game(800, 600);
+    game.InitGame(); // 注意：现在的 InitGame 可能只初始化窗口，或者由构造函数处理
     
-    game.InitGame(); // 调用初始化
-    
-    // 主循环
     while (!WindowShouldClose() && game.running) {
-        game.ProcessInput();
-        game.CheckCollisions();
-        game.UpdateGame();
-        game.Render();
+        game.ProcessInput(); // 状态机在此处处理输入
+        game.UpdateGame();  // 状态机在此处处理更新
+        game.Render();      // 状态机在此处处理渲染
     }
-
-    // 结局画面逻辑
-    // 注意：这里为了保持逻辑完整，也可以移入 Render，但为了清晰暂时放在这里
     
-
     CloseWindow();
-
     return 0;
 }

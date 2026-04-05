@@ -11,8 +11,17 @@ class Ball;
 class Paddle;
 class Brick;
 
+enum GameState { MENU, PLAYING, PAUSED, GAMEOVER };
+
 class Game {
 private:
+    GameState state;
+
+    Rectangle btnStart;
+    Rectangle btnExit;
+    Rectangle btnResume;
+    Rectangle btnPause;
+
 public:
     // --- 游戏状态 ---
     bool running;
@@ -35,11 +44,19 @@ public:
     void CheckCollisions();   // 专门处理碰撞的子函数
     void Render();            // 负责所有绘制工作
 
+    void UpdateMenu();
+    void DrawMenu();
+    void UpdatePlaying();
+    void DrawPlaying();
+    void UpdatePaused();
+    void DrawPaused();
+    void UpdateGameOver();
+    void DrawGameOver();
+
 
     Game(int width = 800, int height = 600);
     ~Game(); // 记得释放 new 出来的 ball 和 paddle
 
-    void Run(); // 主循环入口
 };
 
 #endif
