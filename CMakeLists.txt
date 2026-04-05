@@ -12,3 +12,10 @@ add_executable(breakout_week2
 )
 
 target_link_libraries(breakout_week2 raylib)
+
+option(BUILD_TESTS "Build the unit tests" ON)
+
+if(BUILD_TESTS)
+    enable_testing() # 启用 CTest
+    add_subdirectory(tests) # 引入 tests 目录下的配置
+endif()
