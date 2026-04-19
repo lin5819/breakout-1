@@ -10,7 +10,7 @@ private:
 public:
     // 修改构造函数，增加 speed 参数
     Paddle(float x, float y, float w, float h, float s); 
-    void Draw();
+    void Draw(Rectangle paddleRect);
     void MoveLeft();
     void MoveRight();
     Rectangle GetRect() { return rect; }

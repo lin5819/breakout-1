@@ -9,6 +9,21 @@
     "initial_lives": 3,
     "victory_bricks_threshold": 0
   },
+  "powerup": {
+    "spawn_chance": 20,
+    "fall_speed": 50,
+    "duration": {
+      "grow_paddle": 10
+    },
+    "animation": {
+      "grow_time": 1
+    },
+    "values": {
+      "grow_factor": 2.0,
+      "extra_lives": 2,
+      "split_count": 1
+    }
+  },
   "ball": {
     "radius": 10,
     "start_speed_x": 3,
@@ -28,5 +43,34 @@
     "height": 30,
     "spacing": 20,
     "color": "GREEN"
+  },
+  "graphics": {
+    "powerups": {
+      "size": 15,
+      "grow": {
+        "color": [
+          255,
+          0,
+          255
+        ],
+        "symbol": "G"
+      },
+      "split": {
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "symbol": "S"
+      },
+      "life": {
+        "color": [
+          255,
+          255,
+          0
+        ],
+        "symbol": "H"
+      }
+    }
   }
 }

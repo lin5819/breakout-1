@@ -5,8 +5,8 @@ Paddle::Paddle(float x, float y, float w, float h, float s) {
     speed = s; // 初始化速度
 }
 
-void Paddle::Draw() {
-    DrawRectangleRec(rect, BLUE);
+void Paddle::Draw(Rectangle paddleRect) {
+    DrawRectangleRec(paddleRect, BLUE);
 }
 
 void Paddle::MoveLeft() {
