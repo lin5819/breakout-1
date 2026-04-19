@@ -296,7 +296,7 @@ void Game::CheckCollisions()
             bounced = true;
         }
 
-        if ((ballPos.y - ball->GetRadius() <= 0 && ball->GetSpeed().y < 0))
+        if ((ballPos.y - ball->GetRadius() <= 0 ))
         {
             // --- 顶部碰撞粒子 ---
             Vector2 spawnPos = ballPos;
