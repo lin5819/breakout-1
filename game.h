@@ -5,6 +5,51 @@
 #include "raylib.h"
 #include <vector>
 #include <string>
+#include <algorithm>
+
+// --- 粒子系统定义 ---
+struct Particle
+{
+    Vector2 position;
+    Vector2 velocity;
+    float alpha;
+    float lifeTime;
+    float maxLifeTime;
+    Color color;
+    float radius;
+
+    Particle(Vector2 pos, Vector2 vel, float life, Color col, float r)
+        : position(pos), velocity(vel), lifeTime(life), maxLifeTime(life), color(col), radius(r), alpha(1.0f) {}
+
+    void Update(float deltaTime)
+    {
+        position.x += velocity.x * deltaTime;
+        position.y += velocity.y * deltaTime;
+        velocity.y += 100.0f * deltaTime; // 模拟重力
+        lifeTime -= deltaTime;
+        alpha = lifeTime / maxLifeTime; // 随着生命减少而变透明
+    }
+
+    void CheckWallBounce(int screenWidth, int screenHeight)
+    {
+        // 左右边界反弹
+        if ((position.x - radius <= 0 && velocity.x < 0) ||
+            (position.x + radius >= screenWidth && velocity.x > 0))
+        {
+            velocity.x *= -0.8f; // 反弹并损失能量
+            position.x = std::clamp(position.x, radius, screenWidth - radius);
+        }
+        // 上下边界反弹
+        if ((position.y - radius <= 0 && velocity.y < 0) ||
+            (position.y + radius >= screenHeight && velocity.y > 0))
+        {
+            velocity.y *= -0.8f;
+            position.y = std::clamp(position.y, radius, screenHeight - radius);
+        }
+    }
+
+    bool IsAlive() { return lifeTime > 0; }
+};
 
 struct GameConfig
 {
@@ -156,6 +201,9 @@ private:
     // 修改球的管理，以支持多球
     // 将单个 Ball* 改为 vector，方便管理主球和分裂球
     // 如果不想改结构，可以用一个主球加一个额外球vector，这里为了逻辑清晰改用vector
+
+    // 在 Game 类的 private 区域添加
+    std::vector<Particle> particles;
 
 public:
     GameConfig config;

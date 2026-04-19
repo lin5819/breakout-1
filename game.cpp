@@ -273,6 +273,45 @@ void Game::CheckCollisions()
         Vector2 ballPos = ball->GetPosition();
         float ballRadius = ball->GetRadius();
 
+        bool bounced = false;
+
+        if ((ballPos.x - ball->GetRadius() <= 0) ||
+            (ballPos.x + ball->GetRadius() >= screenWidth))
+        {
+            // --- 侧壁碰撞粒子 ---
+            Vector2 spawnPos = ballPos;
+            // 限制生成位置在屏幕内
+            spawnPos.x = std::clamp(spawnPos.x, 0.0f, (float)screenWidth);
+            int count = GetRandomValue(5, 10);
+            for (int i = 0; i < count; i++)
+            {
+                // 沿着碰撞法线方向飞溅 (左右碰撞，粒子主要沿X轴飞)
+                float angle = (ballPos.x < screenWidth / 2) ? GetRandomValue(-45, 45) : GetRandomValue(135, 225);
+                angle *= 3.14159f / 180.0f;
+                float speed = GetRandomValue(80, 120);
+                Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
+                // 使用球的颜色 (RED)
+                particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
+            }
+            bounced = true;
+        }
+
+        if ((ballPos.y - ball->GetRadius() <= 0 && ball->GetSpeed().y < 0))
+        {
+            // --- 顶部碰撞粒子 ---
+            Vector2 spawnPos = ballPos;
+            spawnPos.y = 0; // 强制在顶部
+            int count = GetRandomValue(5, 10);
+            for (int i = 0; i < count; i++)
+            {
+                float angle = GetRandomValue(45, 135) * 3.14159f / 180.0f; // 向下飞溅
+                float speed = GetRandomValue(80, 120);
+                Vector2 vel = {(float)GetRandomValue(-50, 50), speed};
+                particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
+            }
+            bounced = true;
+        }
+
         // 1. 球与挡板碰撞 (处理挡板加长逻辑)
         paddleRect = paddle->GetRect();
 
@@ -323,6 +362,19 @@ void Game::CheckCollisions()
                 continue;
             if (CheckCollisionCircleRec(ballPos, ballRadius, brick.GetRect()))
             {
+                Vector2 brickCenter = {
+                    brick.GetRect().x + brick.GetRect().width / 2,
+                    brick.GetRect().y + brick.GetRect().height / 2};
+
+                int count = GetRandomValue(5, 10);
+                for (int i = 0; i < count; i++)
+                {
+                    float angle = GetRandomValue(0, 360) * 3.14159f / 180.0f;
+                    float speed = GetRandomValue(50, 150);
+                    Vector2 vel = {cosf(angle) * speed, sinf(angle) * speed};
+                    // 使用砖块的绿色 (GREEN)
+                    particles.emplace_back(brickCenter, vel, 0.5f, GREEN, 2.0f);
+                }
 
                 // --- 道具生成逻辑 ---
                 if (GetRandomValue(1, 100) <= powerUpCfg.spawnChance)
@@ -330,9 +382,6 @@ void Game::CheckCollisions()
                     std::vector<std::string> types = {"grow", "split", "life"};
                     std::string type = types[GetRandomValue(0, 2)];
 
-                    Vector2 brickCenter = {
-                        brick.GetRect().x + brick.GetRect().width / 2,
-                        brick.GetRect().y + brick.GetRect().height / 2};
                     PowerUp *powerUp = PowerUpFactory::CreatePowerUp(type, brickCenter);
                     if (powerUp)
                     {
@@ -379,7 +428,7 @@ void Game::UpdateGame()
                 // 如果是 Grow 效果结束，不需要立即缩小，由动画处理
             }
         }
-
+        CheckCollisions();
         if (bricksRemaining <= 0)
         {
             state = GAMEOVER;
@@ -424,11 +473,24 @@ void Game::UpdateGame()
         }
         // 注意：原来的 UpdatePowerUps, CheckCollisions 等调用保持不变，不要放在这里面
 
+        for (auto it = particles.begin(); it != particles.end();)
+        {
+            it->Update(GetFrameTime());
+            it->CheckWallBounce(screenWidth, screenHeight); // 关键：让粒子碰壁反弹
+            if (!it->IsAlive())
+            {
+                it = particles.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
         // --- 更新道具 ---
         UpdatePowerUps(GetFrameTime());
 
         // --- 检查碰撞 ---
-        CheckCollisions();
+
         CheckPowerUpCollision();
     }
 }
@@ -453,7 +515,7 @@ void Game::UpdatePowerUps(float deltaTime)
 void Game::Render()
 {
     BeginDrawing();
-    ClearBackground(RAYWHITE);
+    ClearBackground(DARKGRAY);
 
     // 根据状态绘制画面
     switch (state)
@@ -511,6 +573,21 @@ void Game::DrawPlaying()
     {
         if (brick.IsActive())
             brick.Draw();
+    }
+
+    for (auto &p : particles)
+    {
+        // 使用 DrawCircleGradient 模拟光晕：中心亮，边缘透明
+        // 这里的颜色是基础色，alpha 控制透明度
+        Color colorWithAlpha = p.color;
+        colorWithAlpha.a = (unsigned char)(255 * p.alpha);
+
+        // 绘制多层圆圈来模拟光晕
+        // 外层光晕 (大半径，低透明度)
+        DrawCircleV(p.position, p.radius * 3, Fade(colorWithAlpha, 0.1f));
+        DrawCircleV(p.position, p.radius * 2, Fade(colorWithAlpha, 0.3f));
+        // 内核 (小半径，高亮度)
+        DrawCircleV(p.position, p.radius, colorWithAlpha);
     }
 
     // 绘制UI
@@ -586,6 +663,9 @@ void PowerUp::Draw()
 {
     if (active)
     {
+        DrawCircleV(position, radius * 4, Fade(WHITE, 0.1f * sin(GetTime() * 10))); // 脉动辉光
+        DrawCircleV(position, radius * 2, Fade(YELLOW, 0.3f));
+
         DrawCircleV(position, radius, color);
         // 绘制符号 (简单居中)
         DrawText(symbol.c_str(), position.x - MeasureText(symbol.c_str(), 10) / 2, position.y - 5, 10, WHITE);
