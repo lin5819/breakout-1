@@ -16,6 +16,10 @@ using json = nlohmann::json;
 
 PowerUpConfig PowerUpFactory::cfg;
 
+float Ball::maxspeedx;
+float Ball::randspeedx;
+float Ball::addspeedx;
+
 void Game::LoadConfig()
 {
     std::ifstream file("../config.json");
@@ -44,6 +48,10 @@ void Game::LoadConfig()
         config.ballRadius = data["ball"]["radius"];
         config.ballStartSpeedX = data["ball"]["start_speed_x"];
         config.ballStartSpeedY = data["ball"]["start_speed_y"];
+
+        Ball::addspeedx = data["ball"]["addspeedx"];
+        Ball::maxspeedx = data["ball"]["maxspeedx"];
+        Ball::randspeedx = data["ball"]["randspeedx"];
 
         // 读取 Paddle 配置
         config.paddleWidth = data["paddle"]["width"];
@@ -167,6 +175,10 @@ void Game::ResetBalls()
     Vector2 startPos = {(float)screenWidth / 2, (float)screenHeight / 2};
     Vector2 startSpeed = {config.ballStartSpeedX, config.ballStartSpeedY};
     balls.push_back(new Ball(startPos, startSpeed, config.ballRadius));
+    for (auto &ball : balls)
+    {
+        ball->Randspeedx();
+    }
 }
 
 void Game::ProcessInput()
@@ -296,9 +308,11 @@ void Game::CheckCollisions()
         if (CheckCollisionCircleRec(ballPos, ballRadius, paddleRect))
         {
             // 简单反弹
-            if (ballPos.y + ballRadius >= paddleRect.y)
+            if (ballPos.y + ballRadius >= paddleRect.y && ball->GetSpeed().y > 0)
             {
                 ball->ReverseYSpeed();
+                ball->Addspeedx();
+                ball->Randspeedx();
             }
         }
 

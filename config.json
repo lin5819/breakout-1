@@ -26,9 +26,12 @@
   },
   "ball": {
     "radius": 10,
-    "start_speed_x": 3,
+    "start_speed_x": 0,
     "start_speed_y": 3,
-    "color": "RED"
+    "color": "RED",
+    "addspeedx": 2.0,
+    "maxspeedx": 5.0,
+    "randspeedx": 1.0
   },
   "paddle": {
     "width": 100,
