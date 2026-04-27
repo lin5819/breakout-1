@@ -6,6 +6,10 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+extern "C"
+{
+#include <enet/enet.h>
+}
 
 // --- 粒子系统定义 ---
 struct Particle
@@ -78,12 +82,42 @@ struct GameConfig
     float brickWidth = 90.0f;
     float brickHeight = 30.0f;
     float brickSpacing = 20.0f;
+
+    // Network
+    int port = 12345;
+    std::string hostIp = "127.0.0.1";
+    std::string gameMode = "SINGLEPLAYER"; // "SINGLEPLAYER", "MULTIPLAYER_HOST", "MULTIPLAYER_CLIENT"
 };
 // 前向声明 (Forward Declarations)，因为我们还没有包含具体的头文件
 // 或者你可以选择在这里 include "Ball.h" "Paddle.h" "Brick.h"
 class Ball;
 class Paddle;
 class Brick;
+
+// 网络包类型
+enum PacketType
+{
+    PACKET_INPUT, // 客户端发给主机：我的挡板位置
+    PACKET_STATE  // 主机发给客户端：球和所有挡板的位置
+};
+
+// 输入数据包 (由客户端发送)
+struct InputPacket
+{
+    float paddleX; // P2 挡板的期望位置
+    bool button;   // 预留
+};
+
+// 状态数据包 (由主机广播)
+struct StatePacket
+{
+    float ballX, ballY;
+    float paddle1X; // P1 挡板位置
+    float paddle2X; // P2 挡板位置
+    int lives;
+    int bricksRemaining;
+    bool gameActive;
+};
 
 struct PowerUpConfig
 {
@@ -181,7 +215,8 @@ enum GameState
     MENU,
     PLAYING,
     PAUSED,
-    GAMEOVER
+    GAMEOVER,
+    CONNECTING
 };
 
 class Game
@@ -190,6 +225,9 @@ private:
     GameState state;
 
     Rectangle btnStart;
+    Rectangle btnSingle;  // 单人模式按钮
+    Rectangle btnHost;    // 创建主机按钮
+    Rectangle btnClient;  // 加入游戏按钮
     Rectangle btnExit;
     Rectangle btnResume;
     Rectangle btnPause;
@@ -216,7 +254,6 @@ public:
 
     // --- 游戏对象 ---
     Ball *ball;
-    Paddle *paddle;
     std::vector<Brick> bricks;
 
     // --- 游戏数据 ---
@@ -224,6 +261,29 @@ public:
     int bricksRemaining;
     int screenWidth;
     int screenHeight;
+
+    // 网络核心组件
+    ENetHost *netHost;
+    ENetPeer *netPeer; // 用于客户端或主机连接特定对等体
+
+    // 游戏状态
+    bool isNetworkMode;
+    bool isConnected;
+
+    // 双人游戏对象 (单人模式下 P2 不可见或不生效)
+    Paddle *paddle1;
+    Paddle *paddle2;
+
+    // 网络逻辑函数
+    void InitNetwork();
+    void ShutdownNetwork();
+    void SendInputPacket();
+    void BroadcastStatePacket();
+    void HandleNetworkPackets();
+
+    bool IsSinglePlayer() { return config.gameMode == "SINGLEPLAYER"; }
+    bool IsHost() { return config.gameMode == "MULTIPLAYER_HOST"; }
+    bool IsClient() { return config.gameMode == "MULTIPLAYER_CLIENT"; }
 
     // --- 私有方法 (逻辑处理) ---
     void InitGame();        // 初始化游戏数据和对象
@@ -249,7 +309,7 @@ public:
     void LoadPowerUpConfig(); // 声明
     void UpdatePowerUps(float deltaTime);
     void CheckPowerUpCollision();
-    void ResetBalls(); // 需要重构 ResetGame 中的球初始化逻辑
+    void ResetBalls(); 
 
     Game(int width = 800, int height = 600);
     ~Game(); // 记得释放 new 出来的 ball 和 paddle

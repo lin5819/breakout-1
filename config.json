@@ -1,4 +1,9 @@
 {
+  "network": {
+    "port": 12345,
+    "host_ip": "127.0.0.1",
+    "game_mode": "SINGLEPLAYER"
+  },
   "window": {
     "width": 800,
     "height": 600,

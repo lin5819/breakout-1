@@ -14,6 +14,7 @@ public:
     void MoveLeft();
     void MoveRight();
     Rectangle GetRect() { return rect; }
+    void SetRect(Rectangle a) {rect = a ;}
 };
 
 #endif

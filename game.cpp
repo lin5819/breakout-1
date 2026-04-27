@@ -35,6 +35,13 @@ void Game::LoadConfig()
         json data;
         file >> data;
 
+        if (data.contains("network"))
+        {
+            config.port = data["network"]["port"];
+            config.hostIp = data["network"]["host_ip"];
+            config.gameMode = data["network"]["game_mode"];
+        }
+
         // 读取 Window 配置
         config.screenWidth = data["window"]["width"];
         config.screenHeight = data["window"]["height"];
@@ -97,7 +104,9 @@ void Game::LoadConfig()
 }
 
 Game::Game(int width, int height)
-    : screenWidth(width), screenHeight(height), running(true), bricksRemaining(0), ball(nullptr), paddle(nullptr), activeBuff(""), buffTimer(0)
+    : screenWidth(width), screenHeight(height), running(true), bricksRemaining(0), ball(nullptr), activeBuff(""), buffTimer(0), netHost(nullptr), netPeer(nullptr),
+      isNetworkMode(false), isConnected(false),
+      paddle1(nullptr), paddle2(nullptr)
 {
     LoadConfig();
 
@@ -112,13 +121,75 @@ Game::Game(int width, int height)
     btnResume = {(float)screenWidth / 2 - 100, 200, 200, 50};
     btnPause = {10, 10, 40, 40}; // 屏幕左上角的暂停按钮
     // 构造函数主要进行参数初始化
+    int btnWidth = 200;
+    int btnHeight = 50;
+    int centerX = screenWidth / 2 - btnWidth / 2;
+
+    // 垂直排列，间距 20
+    btnSingle = (Rectangle){(float)centerX, 400, (float)btnWidth, (float)btnHeight};
+    btnHost = (Rectangle){(float)centerX, 470, (float)btnWidth, (float)btnHeight};
+    btnClient = (Rectangle){(float)centerX, 540, (float)btnWidth, (float)btnHeight};
 }
 
 Game::~Game()
 {
+    ShutdownNetwork();
     delete ball;
-    delete paddle;
+    delete paddle1;
+    delete paddle2;
     // vector 会自动释放
+}
+
+void Game::ShutdownNetwork()
+{
+    if (netHost != nullptr)
+    {
+        enet_host_destroy(netHost);
+        netHost = nullptr;
+    }
+    enet_deinitialize();
+}
+
+void Game::InitNetwork()
+{
+    // 初始化 ENet
+    if (enet_initialize() < 0)
+    {
+        printf("ENet 初始化失败!\n");
+        return;
+    }
+
+    ENetAddress address;
+
+    if (IsHost())
+    {
+        // 主机：监听端口
+        address.host = ENET_HOST_ANY;
+        address.port = config.port;
+        netHost = enet_host_create(&address, 32, 2, 0, 0); // 支持32个连接，2个通道
+        if (netHost == nullptr)
+        {
+            printf("无法创建 ENet Host!\n");
+            return;
+        }
+        printf("主机启动，等待连接...\n");
+        state = CONNECTING; // 引入 CONNECTING 状态或在 PLAYING 中轮询
+    }
+    else if (IsClient())
+    {
+        // 客户端：连接主机
+        netHost = enet_host_create(NULL, 1, 2, 0, 0);
+        enet_address_set_host(&address, config.hostIp.c_str());
+        address.port = config.port;
+
+        netPeer = enet_host_connect(netHost, &address, 2, 0);
+        if (netPeer == nullptr)
+        {
+            printf("无法连接到主机!\n");
+            state = MENU;
+        }
+    }
+    // SINGLEPLAYER 不做任何事
 }
 
 Rectangle paddleRect;
@@ -136,7 +207,10 @@ void Game::ResetGame()
     for (auto b : balls)
         delete b;
     balls.clear();
-    delete paddle;
+    delete paddle1;
+    delete paddle2; // 新增
+    paddle1 = nullptr;
+    paddle2 = nullptr;
     for (auto b : activePowerUps)
         delete b;
     activePowerUps.clear();
@@ -146,7 +220,13 @@ void Game::ResetGame()
 
     // 创建挡板
     float paddleX = (screenWidth - config.paddleWidth) / 2;
-    paddle = new Paddle(paddleX, screenHeight - 50, config.paddleWidth, config.paddleHeight, config.paddleSpeed);
+    paddle1 = new Paddle(paddleX, screenHeight - 50, config.paddleWidth, config.paddleHeight, config.paddleSpeed);
+
+    // P2 挡板 (顶部) - 仅在双人模式下创建
+    if (!IsSinglePlayer())
+    {
+        paddle2 = new Paddle(paddleX, screenHeight - 50, config.paddleWidth, config.paddleHeight, config.paddleSpeed);
+    }
 
     // 3. 重置砖块
     bricks.clear();
@@ -227,10 +307,32 @@ void Game::ProcessInput()
             lives += 100;
         }
         // 游戏中的移动逻辑 (原来的 ProcessInput 内容)
-        if (IsKeyDown(KEY_LEFT))
-            paddle->MoveLeft();
-        if (IsKeyDown(KEY_RIGHT))
-            paddle->MoveRight();
+        if (IsSinglePlayer())
+        {
+            // 单人模式：仅控制 P1
+            if (IsKeyDown(KEY_LEFT))
+                paddle1->MoveLeft();
+            if (IsKeyDown(KEY_RIGHT))
+                paddle1->MoveRight();
+        }
+        else if (IsHost())
+        {
+            // 主机模式：本地控制 P1
+            if (IsKeyDown(KEY_LEFT))
+                paddle1->MoveLeft();
+            if (IsKeyDown(KEY_RIGHT))
+                paddle1->MoveRight();
+
+            // 主机不处理 P2 输入，P2 输入由客户端发送过来
+        }
+        else if (IsClient())
+        {
+            // 客户端模式：本地控制 P2 (发送输入)
+            // 客户端不直接移动本地 P2，而是发送请求给主机
+            SendInputPacket();
+
+            // 如果需要本地预测 (Local Prediction)，可以在这里临时移动 P2，但最终以主机为准
+        }
         if (IsKeyPressed(KEY_ESCAPE))
         {
             state = PAUSED;
@@ -266,132 +368,141 @@ void Game::ProcessInput()
 void Game::CheckCollisions()
 {
     // ... (处理球与球的碰撞，如果需要的话)
-
-    // 处理每个球与世界的碰撞
-    for (auto &ball : balls)
+    if (IsSinglePlayer() || IsHost())
     {
-        Vector2 ballPos = ball->GetPosition();
-        float ballRadius = ball->GetRadius();
-
-        bool bounced = false;
-
-        if ((ballPos.x - ball->GetRadius() <= 0) ||
-            (ballPos.x + ball->GetRadius() >= screenWidth))
+        std::vector<Paddle *> p = {paddle1, paddle2};
+        for (auto &paddle : p)
         {
-            // --- 侧壁碰撞粒子 ---
-            Vector2 spawnPos = ballPos;
-            // 限制生成位置在屏幕内
-            spawnPos.x = std::clamp(spawnPos.x, 0.0f, (float)screenWidth);
-            int count = GetRandomValue(5, 10);
-            for (int i = 0; i < count; i++)
+            if (paddle != nullptr)
             {
-                // 沿着碰撞法线方向飞溅 (左右碰撞，粒子主要沿X轴飞)
-                float angle = (ballPos.x < screenWidth / 2) ? GetRandomValue(-45, 45) : GetRandomValue(135, 225);
-                angle *= 3.14159f / 180.0f;
-                float speed = GetRandomValue(80, 120);
-                Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
-                // 使用球的颜色 (RED)
-                particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
-            }
-            bounced = true;
-        }
-
-        if ((ballPos.y - ball->GetRadius() <= 0 ))
-        {
-            // --- 顶部碰撞粒子 ---
-            Vector2 spawnPos = ballPos;
-            spawnPos.y = 0; // 强制在顶部
-            int count = GetRandomValue(5, 10);
-            for (int i = 0; i < count; i++)
-            {
-                float angle = GetRandomValue(45, 135) * 3.14159f / 180.0f; // 向下飞溅
-                float speed = GetRandomValue(80, 120);
-                Vector2 vel = {(float)GetRandomValue(-50, 50), speed};
-                particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
-            }
-            bounced = true;
-        }
-
-        // 1. 球与挡板碰撞 (处理挡板加长逻辑)
-        paddleRect = paddle->GetRect();
-
-        // 动态计算当前挡板宽度 (实现平滑缩放)
-        float currentPaddleWidth = paddleRect.width;
-        if (activeBuff == "grow")
-        {
-            // 插值计算宽度
-            float t = (PowerUpFactory::cfg.growDuration - buffTimer); // 0 到 1
-            if (t < 1)
-            {
-                // 正在变大过程
-                currentPaddleWidth = Lerp(paddleRect.width, paddleRect.width * PowerUpFactory::cfg.growFactor, t);
-            }
-            else if (buffTimer < PowerUpFactory::cfg.growAnimationTime)
-            {
-                // 效果结束，正在恢复原状
-                float t = (PowerUpFactory::cfg.growAnimationTime - buffTimer);
-                currentPaddleWidth = Lerp(paddleRect.width * PowerUpFactory::cfg.growFactor, paddleRect.width, t);
-            }
-            else
-            {
-                // 持续期间保持最大
-                currentPaddleWidth = paddleRect.width * PowerUpFactory::cfg.growFactor;
-            }
-        }
-
-        // 更新挡板矩形用于碰撞 (中心不变)
-        float paddleX = paddleRect.x;
-        float paddleCenter = paddleX + paddleRect.width / 2;
-        paddleRect = {paddleCenter - currentPaddleWidth / 2, paddleRect.y, currentPaddleWidth, paddleRect.height};
-
-        if (CheckCollisionCircleRec(ballPos, ballRadius, paddleRect))
-        {
-            // 简单反弹
-            if (ballPos.y + ballRadius >= paddleRect.y && ball->GetSpeed().y > 0)
-            {
-                ball->ReverseYSpeed();
-                ball->Addspeedx();
-                ball->Randspeedx();
-            }
-        }
-
-        // 2. 球与砖块碰撞
-        for (auto &brick : bricks)
-        {
-            if (!brick.IsActive())
-                continue;
-            if (CheckCollisionCircleRec(ballPos, ballRadius, brick.GetRect()))
-            {
-                Vector2 brickCenter = {
-                    brick.GetRect().x + brick.GetRect().width / 2,
-                    brick.GetRect().y + brick.GetRect().height / 2};
-
-                int count = GetRandomValue(5, 10);
-                for (int i = 0; i < count; i++)
+                // 处理每个球与世界的碰撞
+                for (auto &ball : balls)
                 {
-                    float angle = GetRandomValue(0, 360) * 3.14159f / 180.0f;
-                    float speed = GetRandomValue(50, 150);
-                    Vector2 vel = {cosf(angle) * speed, sinf(angle) * speed};
-                    // 使用砖块的绿色 (GREEN)
-                    particles.emplace_back(brickCenter, vel, 0.5f, GREEN, 2.0f);
-                }
+                    Vector2 ballPos = ball->GetPosition();
+                    float ballRadius = ball->GetRadius();
 
-                // --- 道具生成逻辑 ---
-                if (GetRandomValue(1, 100) <= powerUpCfg.spawnChance)
-                {
-                    std::vector<std::string> types = {"grow", "split", "life"};
-                    std::string type = types[GetRandomValue(0, 2)];
+                    bool bounced = false;
 
-                    PowerUp *powerUp = PowerUpFactory::CreatePowerUp(type, brickCenter);
-                    if (powerUp)
+                    if ((ballPos.x - ball->GetRadius() <= 0) ||
+                        (ballPos.x + ball->GetRadius() >= screenWidth))
                     {
-                        activePowerUps.push_back(powerUp);
+                        // --- 侧壁碰撞粒子 ---
+                        Vector2 spawnPos = ballPos;
+                        // 限制生成位置在屏幕内
+                        spawnPos.x = std::clamp(spawnPos.x, 0.0f, (float)screenWidth);
+                        int count = GetRandomValue(5, 10);
+                        for (int i = 0; i < count; i++)
+                        {
+                            // 沿着碰撞法线方向飞溅 (左右碰撞，粒子主要沿X轴飞)
+                            float angle = (ballPos.x < screenWidth / 2) ? GetRandomValue(-45, 45) : GetRandomValue(135, 225);
+                            angle *= 3.14159f / 180.0f;
+                            float speed = GetRandomValue(80, 120);
+                            Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
+                            // 使用球的颜色 (RED)
+                            particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
+                        }
+                        bounced = true;
+                    }
+
+                    if ((ballPos.y - ball->GetRadius() <= 0))
+                    {
+                        // --- 顶部碰撞粒子 ---
+                        Vector2 spawnPos = ballPos;
+                        spawnPos.y = 0; // 强制在顶部
+                        int count = GetRandomValue(5, 10);
+                        for (int i = 0; i < count; i++)
+                        {
+                            float angle = GetRandomValue(45, 135) * 3.14159f / 180.0f; // 向下飞溅
+                            float speed = GetRandomValue(80, 120);
+                            Vector2 vel = {(float)GetRandomValue(-50, 50), speed};
+                            particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
+                        }
+                        bounced = true;
+                    }
+
+                    // 1. 球与挡板碰撞 (处理挡板加长逻辑)
+                    paddleRect = paddle->GetRect();
+
+                    // 动态计算当前挡板宽度 (实现平滑缩放)
+                    float currentPaddleWidth = paddleRect.width;
+                    if (activeBuff == "grow")
+                    {
+                        // 插值计算宽度
+                        float t = (PowerUpFactory::cfg.growDuration - buffTimer); // 0 到 1
+                        if (t < 1)
+                        {
+                            // 正在变大过程
+                            currentPaddleWidth = Lerp(paddleRect.width, paddleRect.width * PowerUpFactory::cfg.growFactor, t);
+                        }
+                        else if (buffTimer < PowerUpFactory::cfg.growAnimationTime)
+                        {
+                            // 效果结束，正在恢复原状
+                            float t = (PowerUpFactory::cfg.growAnimationTime - buffTimer);
+                            currentPaddleWidth = Lerp(paddleRect.width * PowerUpFactory::cfg.growFactor, paddleRect.width, t);
+                        }
+                        else
+                        {
+                            // 持续期间保持最大
+                            currentPaddleWidth = paddleRect.width * PowerUpFactory::cfg.growFactor;
+                        }
+                    }
+
+                    // 更新挡板矩形用于碰撞 (中心不变)
+                    float paddleX = paddleRect.x;
+                    float paddleCenter = paddleX + paddleRect.width / 2;
+                    paddleRect = {paddleCenter - currentPaddleWidth / 2, paddleRect.y, currentPaddleWidth, paddleRect.height};
+
+                    if (CheckCollisionCircleRec(ballPos, ballRadius, paddleRect))
+                    {
+                        // 简单反弹
+                        if (ballPos.y + ballRadius >= paddleRect.y && ball->GetSpeed().y > 0)
+                        {
+                            ball->ReverseYSpeed();
+                            ball->Addspeedx();
+                            ball->Randspeedx();
+                        }
+                    }
+
+                    // 2. 球与砖块碰撞
+                    for (auto &brick : bricks)
+                    {
+                        if (!brick.IsActive())
+                            continue;
+                        if (CheckCollisionCircleRec(ballPos, ballRadius, brick.GetRect()))
+                        {
+                            Vector2 brickCenter = {
+                                brick.GetRect().x + brick.GetRect().width / 2,
+                                brick.GetRect().y + brick.GetRect().height / 2};
+
+                            int count = GetRandomValue(5, 10);
+                            for (int i = 0; i < count; i++)
+                            {
+                                float angle = GetRandomValue(0, 360) * 3.14159f / 180.0f;
+                                float speed = GetRandomValue(50, 150);
+                                Vector2 vel = {cosf(angle) * speed, sinf(angle) * speed};
+                                // 使用砖块的绿色 (GREEN)
+                                particles.emplace_back(brickCenter, vel, 0.5f, GREEN, 2.0f);
+                            }
+
+                            // --- 道具生成逻辑 ---
+                            if (GetRandomValue(1, 100) <= powerUpCfg.spawnChance)
+                            {
+                                std::vector<std::string> types = {"grow", "split", "life"};
+                                std::string type = types[GetRandomValue(0, 2)];
+
+                                PowerUp *powerUp = PowerUpFactory::CreatePowerUp(type, brickCenter);
+                                if (powerUp)
+                                {
+                                    activePowerUps.push_back(powerUp);
+                                }
+                            }
+                            brick.SetActive(false);
+                            bricksRemaining--;
+
+                            ball->ReverseYSpeed(); // 简单处理
+                        }
                     }
                 }
-                brick.SetActive(false);
-                bricksRemaining--;
-
-                ball->ReverseYSpeed(); // 简单处理
             }
         }
     }
@@ -399,25 +510,65 @@ void Game::CheckCollisions()
 
 void Game::CheckPowerUpCollision()
 {
-    Vector2 paddlePos = {paddle->GetRect().x + paddle->GetRect().width / 2, paddle->GetRect().y};
-    float paddleRadius = paddle->GetRect().width / 2; // 简单用圆形检测挡板
-
-    for (auto &powerUp : activePowerUps)
+    std::vector<Paddle *> p = {paddle1, paddle2};
+    for (auto &paddle : p)
     {
-        Vector2 pos = powerUp->GetPosition();
-        // 简单的圆形-圆形检测
-        if (CheckCollisionCircles(pos, powerUp->GetRadius(), paddlePos, paddleRadius))
+        if (paddle != nullptr)
         {
-            powerUp->ApplyEffect(this);
-            powerUp->SetActive(false);
+            Vector2 paddlePos = {paddle->GetRect().x + paddle->GetRect().width / 2, paddle->GetRect().y};
+            float paddleRadius = paddle->GetRect().width / 2; // 简单用圆形检测挡板
+
+            for (auto &powerUp : activePowerUps)
+            {
+                Vector2 pos = powerUp->GetPosition();
+                // 简单的圆形-圆形检测
+                if (CheckCollisionCircles(pos, powerUp->GetRadius(), paddlePos, paddleRadius))
+                {
+                    powerUp->ApplyEffect(this);
+                    powerUp->SetActive(false);
+                }
+            }
         }
     }
 }
 
 void Game::UpdateGame()
 {
+    if (state == MENU)
+    {
+        UpdateMenu();
+        return;
+    }
+
+    if (state == CONNECTING)
+    {
+        HandleNetworkPackets(); // 持续轮询网络事件
+
+        // 如果是客户端，连接成功后进入游戏
+        if (IsClient() && isConnected)
+        {
+            state = PLAYING;
+            ResetGame(); // 客户端也需要初始化对象以便接收状态
+            printf("已连接到主机，进入游戏！\n");
+        }
+        // 如果是主机，一旦有连接（在 HandleNetworkPackets 中设置 isConnected = true），也可以视为开始
+        // 这里简单处理：主机点击后即视为开始，或者你可以等待一个客户端
+        if (IsHost() && isConnected)
+        {
+            state = PLAYING;
+            ResetGame();
+            printf("客户端已连接，游戏开始！\n");
+        }
+        return; // 在连接阶段不更新物理逻辑
+    }
+
     if (state == PLAYING)
     {
+        if (!IsSinglePlayer())
+        {
+            HandleNetworkPackets();
+        }
+
         // --- 处理增益 Buff 时间 ---
         if (!activeBuff.empty())
         {
@@ -437,25 +588,26 @@ void Game::UpdateGame()
         // --- 更新所有球 ---
         // --- 更新所有球 (新逻辑) ---
         bool anyBallDropped = false; // 标记本轮是否有球掉落
-
-        for (auto it = balls.begin(); it != balls.end();)
+        if (IsSinglePlayer() || IsHost())
         {
-            (*it)->Move();
-            (*it)->BounceEdge(screenWidth, screenHeight);
+            for (auto it = balls.begin(); it != balls.end();)
+            {
+                (*it)->Move();
+                (*it)->BounceEdge(screenWidth, screenHeight);
 
-            // 检查球是否掉落 (仅做标记和删除，不扣血)
-            if ((*it)->GetPosition().y > screenHeight)
-            {
-                delete *it;
-                it = balls.erase(it);
-                anyBallDropped = true; // 只要有球掉，就标记
-            }
-            else
-            {
-                ++it;
+                // 检查球是否掉落 (仅做标记和删除，不扣血)
+                if ((*it)->GetPosition().y > screenHeight)
+                {
+                    delete *it;
+                    it = balls.erase(it);
+                    anyBallDropped = true; // 只要有球掉，就标记
+                }
+                else
+                {
+                    ++it;
+                }
             }
         }
-
         // --- 结算逻辑 ---
         // 如果有球掉落 且 此时球容器为空 (意味着刚掉的那个球是最后一个)
         if (anyBallDropped && balls.empty())
@@ -512,6 +664,117 @@ void Game::UpdatePowerUps(float deltaTime)
     }
 }
 
+void Game::SendInputPacket()
+{
+    if (netHost == nullptr || !isConnected)
+        return;
+
+    InputPacket packet;
+    // 客户端控制 P2，发送 P2 的位置意图
+    // 注意：这里发送的是输入状态，而不是直接位置（防止作弊/不同步）
+    packet.paddleX = GetMouseX(); // 或者基于键盘计算的期望位置
+    // 实际上，更严谨的是发送按键状态，但为了简单发送位置
+
+    ENetPacket *enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    enet_peer_send(netPeer, 0, enetPacket);
+}
+
+void Game::BroadcastStatePacket()
+{
+    StatePacket packet;
+    if (!balls.empty())
+    {
+        Vector2 pos = balls[0]->GetPosition();
+        packet.ballX = pos.x;
+        packet.ballY = pos.y;
+    }
+    else
+    {
+        packet.ballX = -1; // 标记无球
+    }
+    packet.paddle1X = paddle1->GetRect().x;
+    packet.paddle2X = (paddle2) ? paddle2->GetRect().x : 0;
+    packet.lives = lives;
+    packet.bricksRemaining = bricksRemaining;
+    packet.gameActive = true;
+
+    // 广播给所有连接的客户端
+    ENetPacket *packetToSend = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    if (!packetToSend)
+    {
+        printf("Failed to create packet!\n");
+        return;
+    }
+    enet_host_broadcast(netHost, 1, packetToSend);
+}
+
+void Game::HandleNetworkPackets()
+{
+    ENetEvent event;
+    while (enet_host_service(netHost, &event, 0) > 0)
+    {
+        switch (event.type)
+        {
+        case ENET_EVENT_TYPE_CONNECT:
+            printf("玩家连接!\n");
+            isConnected = true;
+            break;
+
+        case ENET_EVENT_TYPE_RECEIVE:
+            if (event.channelID == 0)
+            { // 输入通道 (客户端 -> 主机)
+                if (IsHost() && event.packet->dataLength == sizeof(InputPacket))
+                {
+                    InputPacket *input = (InputPacket *)event.packet->data;
+                    // 主机接收到 P2 的输入，移动本地的 P2 挡板
+                    if (paddle2)
+                    {
+                        // 简单同步，实际游戏中可能需要平滑插值
+                        float targetX = input->paddleX;
+                        // 简单限制
+                        if (targetX < 0)
+                            targetX = 0;
+                        if (targetX + paddle2->GetRect().width > screenWidth)
+                            targetX = screenWidth - paddle2->GetRect().width;
+                        // 直接设置位置 (主机权威)
+                        Rectangle tempRect = paddle2->GetRect();
+                        tempRect.x = targetX;
+                        paddle2->SetRect(tempRect);
+                    }
+                }
+            }
+            else if (event.channelID == 1)
+            { // 状态通道 (主机 -> 客户端)
+                if (IsClient() && event.packet->dataLength == sizeof(StatePacket))
+                {
+                    StatePacket *state = (StatePacket *)event.packet->data;
+                    // 客户端接收到主机状态，覆盖本地数据
+                    if (!balls.empty() && state->ballX >= 0)
+                    {
+                        balls[0]->Reset({state->ballX, state->ballY}, balls[0]->GetSpeed());
+                    }
+                    // 客户端控制 P2，所以不需要更新 P2 的位置 (除非是 Spectator 模式)
+                    // 但是需要更新 P1 的位置
+                    if (paddle1)
+                    {
+                        Rectangle tempRect = paddle2->GetRect();
+                        tempRect.x = state->paddle1X;
+                        paddle2->SetRect(tempRect);
+                    }
+                    lives = state->lives;
+                    bricksRemaining = state->bricksRemaining;
+                }
+            }
+            enet_packet_destroy(event.packet);
+            break;
+
+        case ENET_EVENT_TYPE_DISCONNECT:
+            isConnected = false;
+            break;
+        }
+    }
+}
+
 void Game::Render()
 {
     BeginDrawing();
@@ -522,6 +785,11 @@ void Game::Render()
     {
     case MENU:
         DrawMenu();
+        break;
+    case CONNECTING:
+        ClearBackground(DARKGRAY);
+        DrawText("Connecting to server...", screenWidth / 2 - 100, screenHeight / 2, 20, YELLOW);
+        DrawText("Please wait...", screenWidth / 2 - 60, screenHeight / 2 + 30, 20, LIGHTGRAY);
         break;
     case PLAYING:
         DrawPlaying();
@@ -539,6 +807,38 @@ void Game::Render()
     EndDrawing();
 }
 
+void Game::UpdateMenu()
+{
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+    {
+        Vector2 mousePoint = GetMousePosition();
+
+        if (CheckCollisionPointRec(mousePoint, btnSingle))
+        {
+            config.gameMode = "SINGLEPLAYER";
+            state = PLAYING;
+            ResetGame(); // 重置游戏状态
+            printf("模式切换：单人模式\n");
+        }
+        // 2. 检测是否点击“创建主机”
+        else if (CheckCollisionPointRec(mousePoint, btnHost))
+        {
+            config.gameMode = "MULTIPLAYER_HOST";
+            state = CONNECTING; // 进入连接中状态
+            InitNetwork();      // 初始化 ENet 主机
+            printf("模式切换：创建主机 (等待连接...)\n");
+        }
+        // 3. 检测是否点击“加入游戏”
+        else if (CheckCollisionPointRec(mousePoint, btnClient))
+        {
+            config.gameMode = "MULTIPLAYER_CLIENT";
+            state = CONNECTING; // 进入连接中状态
+            InitNetwork();      // 初始化 ENet 客户端
+            printf("模式切换：尝试连接主机...\n");
+        }
+    }
+}
+
 void Game::DrawMenu()
 {
     // 绘制标题
@@ -550,6 +850,34 @@ void Game::DrawMenu()
 
     DrawRectangleRec(btnExit, PINK);
     DrawText("EXIT", 370, 315, 20, DARKBLUE);
+
+    // 单人模式 (绿色)
+    DrawRectangleRec(btnSingle, GREEN);
+    DrawRectangleLinesEx(btnSingle, 2, RAYWHITE);
+
+    // 创建主机 (蓝色)
+    DrawRectangleRec(btnHost, BLUE);
+    DrawRectangleLinesEx(btnHost, 2, RAYWHITE);
+
+    // 加入游戏 (橙色)
+    DrawRectangleRec(btnClient, ORANGE);
+    DrawRectangleLinesEx(btnClient, 2, RAYWHITE);
+
+    // 3. 绘制按钮文字 (居中计算)
+    // 单人
+    const char *textSingle = "SINGLE PLAYER";
+    DrawText(textSingle, btnSingle.x + btnSingle.width / 2 - MeasureText(textSingle, 20) / 2, btnSingle.y + 15, 20, RAYWHITE);
+
+    // 主机
+    const char *textHost = "HOST GAME";
+    DrawText(textHost, btnHost.x + btnHost.width / 2 - MeasureText(textHost, 20) / 2, btnHost.y + 15, 20, RAYWHITE);
+
+    // 客户端
+    const char *textClient = "JOIN GAME";
+    DrawText(textClient, btnClient.x + btnClient.width / 2 - MeasureText(textClient, 20) / 2, btnClient.y + 15, 20, RAYWHITE);
+
+    // 4. 底部提示
+    DrawText("Config loaded from config.json", 10, screenHeight - 20, 10, GRAY);
 }
 
 void Game::DrawPlaying()
@@ -559,7 +887,16 @@ void Game::DrawPlaying()
     {
         ball->Draw();
     }
-    paddle->Draw(paddleRect);
+    if (paddle1)
+    {
+        DrawRectangleRec(paddle1->GetRect(), BLUE);
+    }
+
+    // 绘制 P2 挡板 (顶部) - 仅在双人模式
+    if (paddle2 && !IsSinglePlayer())
+    {
+        DrawRectangleRec(paddle2->GetRect(), MAROON); // 用不同颜色区分
+    }
     for (auto &brick : bricks)
     {
         if (brick.IsActive())
@@ -597,6 +934,12 @@ void Game::DrawPlaying()
     // --- 新增：绘制屏幕左上角的暂停按钮 ---
     DrawRectangleRec(btnPause, GRAY);
     DrawText("| |", 20, 18, 30, WHITE);
+
+    // 网络状态提示
+    if (!IsSinglePlayer())
+    {
+        DrawText(TextFormat("Network: %s", isConnected ? "ONLINE" : "OFFLINE"), 10, 30, 10, isConnected ? GREEN : RED);
+    }
 }
 
 void Game::DrawPaused()
