@@ -452,6 +452,15 @@ void Game::CheckCollisions()
                     float paddleCenter = paddleX + paddleRect.width / 2;
                     paddleRect = {paddleCenter - currentPaddleWidth / 2, paddleRect.y, currentPaddleWidth, paddleRect.height};
 
+                    if (paddle == paddle1)
+                    {
+                        DrawRectangleRec(paddleRect, BLUE);
+                    }
+                    if (paddle==paddle2 && !IsSinglePlayer())
+                    {
+                        DrawRectangleRec(paddleRect, MAROON); // 用不同颜色区分
+                    }
+
                     if (CheckCollisionCircleRec(ballPos, ballRadius, paddleRect))
                     {
                         // 简单反弹
@@ -887,16 +896,7 @@ void Game::DrawPlaying()
     {
         ball->Draw();
     }
-    if (paddle1)
-    {
-        DrawRectangleRec(paddle1->GetRect(), BLUE);
-    }
-
-    // 绘制 P2 挡板 (顶部) - 仅在双人模式
-    if (paddle2 && !IsSinglePlayer())
-    {
-        DrawRectangleRec(paddle2->GetRect(), MAROON); // 用不同颜色区分
-    }
+    
     for (auto &brick : bricks)
     {
         if (brick.IsActive())
