@@ -121,10 +121,10 @@ struct InputPacket
 struct StatePacket
 {
     static const int MAX_BALLS = 20; // 假设一局游戏最多同时存在 20 个球
-    float ballX[MAX_BALLS];
-    float ballY[MAX_BALLS];
-    // 用于标记该槽位是否有球，或者传输球的状态
-    // 如果需要更复杂的状态（如速度不同），可能需要传输 Vector2 数组，但为了简单和包大小，这里用 Exist 标记
+    float ballX_Current[MAX_BALLS]; 
+    float ballY_Current[MAX_BALLS];
+    float ballX_Previous[MAX_BALLS]; 
+    float ballY_Previous[MAX_BALLS];
     // 或者直接传输数量，客户端根据数量渲染前 N 个
     int ballCount; // 新增：当前实际存在的球数量
 
@@ -270,6 +270,8 @@ private:
     Rectangle btnPause;
 
     PowerUpConfig powerUpCfg;
+    
+    std::vector<Vector2> lastFrameBallPositions;
 
     // 新增道具管理
 

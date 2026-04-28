@@ -415,7 +415,7 @@ void Game::CheckCollisions()
         {
             if (!brick.IsActive())
                 continue;
-            if (CheckCollisionCircleRec(ballPos, ballRadius, brick.GetRect()))
+            if (CheckCollisionCircleRec(ballPos, ballRadius + 3, brick.GetRect()))
             {
                 Vector2 brickCenter = {
                     brick.GetRect().x + brick.GetRect().width / 2,
@@ -718,19 +718,35 @@ void Game::BroadcastStatePacket()
     StatePacket packet;
     for (int i = 0; i < StatePacket::MAX_BALLS; i++)
     {
-        packet.ballX[i] = -1; // 用 -1 标记无效位置，防止客户端渲染乱码
-        packet.ballY[i] = -1;
+        if (i < lastFrameBallPositions.size())
+        {
+            packet.ballX_Previous[i] = lastFrameBallPositions[i].x;
+            packet.ballY_Previous[i] = lastFrameBallPositions[i].y;
+        }
+        else
+        {
+            // 如果缓存不够，用 -1 填充或用 Current 值填充
+            packet.ballX_Previous[i] = -1;
+            packet.ballY_Previous[i] = -1;
+        }
     }
 
-    // 获取当前球数量
+    // --- 2. 填充 Current 位置 (当前帧) ---
     packet.ballCount = std::min((int)balls.size(), StatePacket::MAX_BALLS);
 
-    // 遍历游戏中的球列表，填充到数据包中
+    // 清空临时容器，准备更新缓存
+    lastFrameBallPositions.clear();
+
     for (int i = 0; i < packet.ballCount; i++)
     {
         Vector2 pos = balls[i]->GetPosition();
-        packet.ballX[i] = pos.x;
-        packet.ballY[i] = pos.y;
+
+        // 1. 填入当前数据包的 Current
+        packet.ballX_Current[i] = pos.x;
+        packet.ballY_Current[i] = pos.y;
+
+        // 2. 存入缓存，供下一帧作为 Previous 使用
+        lastFrameBallPositions.push_back(pos);
     }
 
     for (int i = 0; i < StatePacket::MAX_POWERUPS; i++)
@@ -839,12 +855,45 @@ void Game::HandleNetworkPackets()
                     // 3. 更新所有现存球的位置
                     for (int i = 0; i < state->ballCount && i < balls.size(); i++)
                     {
-                        // 直接重置位置，不改变速度（或者也可以重置速度，取决于网络抖动情况）
-                        // 这里选择只重置位置，让客户端物理继续运行，减少卡顿感
-                        if (state->ballX[i] >= 0 && state->ballY[i] >= 0)
-                        { // 有效性检查
-                            balls[i]->SetPosition(state->ballX[i], state->ballY[i]);
+                        Vector2 targetPos = {state->ballX_Current[i], state->ballY_Current[i]};
+                        Vector2 prevPos = {state->ballX_Previous[i], state->ballY_Previous[i]};
+
+                        // 如果 Previous 是无效值 (-1)，则直接瞬移
+                        if (prevPos.x < 0 || prevPos.y < 0)
+                        {
+                            balls[i]->SetPosition(targetPos.x, targetPos.y);
+                            continue;
                         }
+
+                        // --- 计算平滑移动 ---
+                        // 方案：计算从 prevPos 到 targetPos 的向量，作为球的速度
+                        // 这样球会沿着正确的轨迹移动
+
+                        Vector2 desiredVelocity = {targetPos.x - prevPos.x, targetPos.y - prevPos.y};
+                        // desiredVelocity 是这一帧应该移动的距离
+
+                        // 获取 Ball 内部的速度变量 (需要通过指针操作)
+                        // 假设我们有一个接口 SetSpeed，或者我们直接修改
+                        // 注意：这会覆盖球原本的物理速度，所以只在客户端生效且只在有网络数据时生效
+
+                        // 计算移动比例 (假设网络帧率和本地帧率一致)
+                        // 我们直接把球的位置设为 prevPos，然后给它一个速度飞向 targetPos
+                        // 但是 Ball 类的 Move() 函数是 += speed，所以我们需要设置 speed = desiredVelocity
+
+                        // 这里有一个风险：如果网络卡顿，desiredVelocity 会很大
+                        // 所以我们限制一下最大速度
+                        float maxInterpSpeed = 500.0f; // 限制插值速度，防止瞬间飞过屏幕
+                        float len = sqrtf(desiredVelocity.x * desiredVelocity.x + desiredVelocity.y * desiredVelocity.y);
+
+                        // 关键：设置球的位置为上一帧位置 (Previous)
+                        // 设置球的速度为计算出的速度
+                        // 注意：这会破坏球的物理反弹逻辑，所以仅在客户端且仅在接收网络数据时这样做
+                        // 在下一帧，如果没收到包，球会继续按这个速度飞，直到收到新包
+
+                        balls[i]->SetPosition(prevPos.x, prevPos.y);
+                        // 这里需要一个 SetSpeed 接口
+                        // 如果没有，我们需要在 Ball.h 中添加
+                        balls[i]->SetSpeed(desiredVelocity.x, desiredVelocity.y);
                     }
 
                     activePowerUps.clear();

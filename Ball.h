@@ -31,6 +31,11 @@ public:
     // 如果需要修改速度向量本身，也可以添加 SetSpeed，这里用简单的反向
 
     void SetPosition(float x, float y);
+    void SetSpeed(float x, float y)
+    {
+        speed.x = x;
+        speed.y = y;
+    }
 
     void Randspeedx();
     void Addspeedx();
