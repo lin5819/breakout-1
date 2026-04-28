@@ -65,3 +65,8 @@ void Ball::Addspeedx()
     if (IsKeyDown(KEY_RIGHT))
         speed.x += addspeedx;
 }
+
+void Ball::SetPosition(float x, float y)
+{
+    position={x,y};
+}

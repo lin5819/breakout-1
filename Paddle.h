@@ -15,6 +15,7 @@ public:
     void MoveRight();
     Rectangle GetRect() { return rect; }
     void SetRect(Rectangle a) {rect = a ;}
+    Rectangle paddleRect;
 };
 
 #endif

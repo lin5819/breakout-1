@@ -30,6 +30,8 @@ public:
     void ReverseYSpeed() { speed.y = -speed.y; }
     // 如果需要修改速度向量本身，也可以添加 SetSpeed，这里用简单的反向
 
+    void SetPosition(float x, float y);
+
     void Randspeedx();
     void Addspeedx();
 

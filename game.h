@@ -11,6 +11,15 @@ extern "C"
 #include <enet/enet.h>
 }
 
+enum GameState
+{
+    MENU,
+    PLAYING,
+    PAUSED,
+    GAMEOVER,
+    CONNECTING
+};
+
 // --- 粒子系统定义 ---
 struct Particle
 {
@@ -111,12 +120,28 @@ struct InputPacket
 // 状态数据包 (由主机广播)
 struct StatePacket
 {
-    float ballX, ballY;
-    float paddle1X; // P1 挡板位置
-    float paddle2X; // P2 挡板位置
+    static const int MAX_BALLS = 20; // 假设一局游戏最多同时存在 20 个球
+    float ballX[MAX_BALLS];
+    float ballY[MAX_BALLS];
+    // 用于标记该槽位是否有球，或者传输球的状态
+    // 如果需要更复杂的状态（如速度不同），可能需要传输 Vector2 数组，但为了简单和包大小，这里用 Exist 标记
+    // 或者直接传输数量，客户端根据数量渲染前 N 个
+    int ballCount; // 新增：当前实际存在的球数量
+
+    static const int MAX_POWERUPS = 20;
+    Vector2 poweruppositions[MAX_POWERUPS];
+    int poweruptypes[MAX_POWERUPS];
+    int powerupCount;
+
+    Rectangle paddle1X; // P1 挡板
+    Rectangle paddle2X; // P2 挡板
     int lives;
     int bricksRemaining;
     bool gameActive;
+    static const int MAX_BRICKS = 100;
+    bool brickStates[MAX_BRICKS];
+    int brickCount; // 实际砖块数量，防止越界
+    GameState states;
 };
 
 struct PowerUpConfig
@@ -165,9 +190,30 @@ public:
     void SetActive(bool a) { active = a; }
     Rectangle GetBounds() const { return {position.x - radius, position.y - radius, radius * 2, radius * 2}; }
     std::string GetType() const { return type; }
+    int GetTypeNum()
+    {
+        if (type == "grow")
+        {
+            return 0;
+        }
+        else if (type == "split")
+        {
+            return 1;
+        }
+        else if (type == "life")
+        {
+            return 2;
+        }
+        else
+        {
+            return -1;
+        }
+    }
 
     Vector2 GetPosition() { return position; }
     float GetRadius() { return radius; }
+    Color GetColor() { return color; }
+    void SetPosition(Vector2 a) { position = a; }
 };
 
 // --- 具体道具类声明 ---
@@ -210,24 +256,15 @@ public:
     static PowerUp *CreatePowerUp(std::string type, Vector2 pos);
 };
 
-enum GameState
-{
-    MENU,
-    PLAYING,
-    PAUSED,
-    GAMEOVER,
-    CONNECTING
-};
-
 class Game
 {
 private:
     GameState state;
 
     Rectangle btnStart;
-    Rectangle btnSingle;  // 单人模式按钮
-    Rectangle btnHost;    // 创建主机按钮
-    Rectangle btnClient;  // 加入游戏按钮
+    Rectangle btnSingle; // 单人模式按钮
+    Rectangle btnHost;   // 创建主机按钮
+    Rectangle btnClient; // 加入游戏按钮
     Rectangle btnExit;
     Rectangle btnResume;
     Rectangle btnPause;
@@ -309,7 +346,7 @@ public:
     void LoadPowerUpConfig(); // 声明
     void UpdatePowerUps(float deltaTime);
     void CheckPowerUpCollision();
-    void ResetBalls(); 
+    void ResetBalls();
 
     Game(int width = 800, int height = 600);
     ~Game(); // 记得释放 new 出来的 ball 和 paddle
