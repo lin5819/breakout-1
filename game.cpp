@@ -109,7 +109,9 @@ void Game::LoadConfig()
 Game::Game(int width, int height)
     : screenWidth(width), screenHeight(height), running(true), bricksRemaining(0), ball(nullptr), activeBuff(""), buffTimer(0), netHost(nullptr), netPeer(nullptr),
       isNetworkMode(false), isConnected(false),
-      paddle1(nullptr), paddle2(nullptr)
+      paddle1(nullptr), paddle2(nullptr),
+      isLoading(false),
+      loadComplete(false)
 {
     LoadConfig();
 
@@ -264,6 +266,10 @@ void Game::ResetBalls()
 
 void Game::ProcessInput()
 {
+    if (IsKeyPressed(KEY_L) && !isLoading)
+    {
+        StartLoadingAsync();
+    }
 
     switch (state)
     {
@@ -551,6 +557,42 @@ void Game::CheckPowerUpCollision()
 
 void Game::UpdateGame()
 {
+    if (isLoading)
+    {
+        // 检查 future 是否有效且是否完成
+        // wait_for 的 timeout 为 0，表示非阻塞检查
+        if (loadingFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        {
+            // 任务完成，获取结果（这里只是等待完成）
+            loadingFuture.get(); // 调用 get() 来释放 future 的资源
+
+            // 2. 任务完成后，通过锁安全地读取共享数据
+            // 这里我们读取 loadComplete 状态
+            bool success = false;
+            {
+                std::lock_guard<std::mutex> lock(gameMutex);
+                success = loadComplete;
+            }
+
+            if (success)
+            {
+                // 3. 执行主线程操作：改变背景颜色
+                // 注意：改变颜色通常是在 Render 阶段，所以我们设置一个标志
+                // 或者直接修改配置。为了演示，我们修改一个背景颜色变量
+                // 假设我们有一个 bgColor 成员变量
+                // bgColor = PURPLE;
+
+                // 如果没有 bgColor 变量，我们可以直接在这里设置一个标志
+                // 然后在 Render 函数中判断
+
+                // 这里为了简单，直接打印日志或设置状态
+                printf("异步加载完成！背景已改为紫色。\n");
+            }
+
+            isLoading = false;
+        }
+    }
+
     if (state == MENU)
     {
         UpdateMenu();
@@ -954,7 +996,31 @@ void Game::HandleNetworkPackets()
 void Game::Render()
 {
     BeginDrawing();
-    ClearBackground(DARKGRAY);
+
+    if (isLoading)
+    {
+        // 加载过程中显示深灰色
+        ClearBackground(DARKGRAY);
+    }
+    else
+    {
+        // 加载完成后或正常游戏，如果 loadComplete 为 true 则显示紫色
+        // 注意：这里需要检查 loadComplete，但为了线程安全，我们用锁
+        bool showPurple = false;
+        {
+            std::lock_guard<std::mutex> lock(gameMutex);
+            showPurple = loadComplete;
+        }
+
+        if (showPurple)
+        {
+            ClearBackground(PURPLE); // 加载后变紫
+        }
+        else
+        {
+            ClearBackground(DARKGRAY); // 正常游戏背景
+        }
+    }
 
     // 根据状态绘制画面
     switch (state)
@@ -980,6 +1046,11 @@ void Game::Render()
         break;
     }
 
+    if (isLoading)
+    {
+        DrawText("Loading...", screenWidth / 2 - 50, screenHeight / 2, 40, YELLOW);
+    }
+    
     EndDrawing();
 }
 
@@ -1274,4 +1345,27 @@ PowerUp *PowerUpFactory::CreatePowerUp(std::string type, Vector2 pos)
         return new ExtraLifePowerUp(pos, radius, cfg.colorLife, cfg.symbolLife);
     }
     return nullptr;
+}
+
+void Game::StartLoadingAsync()
+{
+    // 1. 创建一个 packaged_task，包装耗时的加载函数
+    // 这里使用 lambda 表达式模拟耗时操作
+    std::packaged_task<void()> task([this]()
+                                    {
+        // 模拟耗时加载（5秒）
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        
+        // 模拟加载完成后需要传递的数据
+        // 这里我们直接修改 loadComplete，为了线程安全，使用锁
+        std::lock_guard<std::mutex> lock(gameMutex);
+        loadComplete = true; });
+
+    // 2. 通过 async 启动异步任务
+    // 将 packaged_task 的 future 保存下来以便查询状态
+    loadingFuture = std::async(std::launch::async, std::move(task));
+
+    // 3. 更新本地状态
+    isLoading = true;
+    loadComplete = false; // 重置状态
 }

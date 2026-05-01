@@ -6,6 +6,10 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <future>
+#include <mutex>
+#include <thread>
+#include <chrono>
 extern "C"
 {
 #include <enet/enet.h>
@@ -121,9 +125,9 @@ struct InputPacket
 struct StatePacket
 {
     static const int MAX_BALLS = 20; // 假设一局游戏最多同时存在 20 个球
-    float ballX_Current[MAX_BALLS]; 
+    float ballX_Current[MAX_BALLS];
     float ballY_Current[MAX_BALLS];
-    float ballX_Previous[MAX_BALLS]; 
+    float ballX_Previous[MAX_BALLS];
     float ballY_Previous[MAX_BALLS];
     // 或者直接传输数量，客户端根据数量渲染前 N 个
     int ballCount; // 新增：当前实际存在的球数量
@@ -259,6 +263,11 @@ public:
 class Game
 {
 private:
+    std::future<void> loadingFuture;
+    mutable std::mutex gameMutex;
+    bool isLoading;
+    bool loadComplete;
+
     GameState state;
 
     Rectangle btnStart;
@@ -270,7 +279,7 @@ private:
     Rectangle btnPause;
 
     PowerUpConfig powerUpCfg;
-    
+
     std::vector<Vector2> lastFrameBallPositions;
 
     // 新增道具管理
@@ -349,6 +358,8 @@ public:
     void UpdatePowerUps(float deltaTime);
     void CheckPowerUpCollision();
     void ResetBalls();
+
+    void StartLoadingAsync();
 
     Game(int width = 800, int height = 600);
     ~Game(); // 记得释放 new 出来的 ball 和 paddle
