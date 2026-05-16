@@ -34,17 +34,32 @@ struct Particle
     float maxLifeTime;
     Color color;
     float radius;
+    bool active;
 
-    Particle(Vector2 pos, Vector2 vel, float life, Color col, float r)
-        : position(pos), velocity(vel), lifeTime(life), maxLifeTime(life), color(col), radius(r), alpha(1.0f) {}
+    Particle() : active(false) {}
+
+    void Reset(Vector2 pos, Vector2 vel, float life, Color col, float r)
+    {
+        // 重置数据，而不是重新构造
+        position = pos;
+        velocity = vel;
+        lifeTime = life;
+        maxLifeTime = life;
+        color = col;
+        radius = r;
+        alpha = 1.0f;
+        active = true; // 激活
+    }
 
     void Update(float deltaTime)
     {
+        if (!active) return;
         position.x += velocity.x * deltaTime;
         position.y += velocity.y * deltaTime;
         velocity.y += 100.0f * deltaTime; // 模拟重力
         lifeTime -= deltaTime;
         alpha = lifeTime / maxLifeTime; // 随着生命减少而变透明
+        if (lifeTime <= 0) active = false; // 死亡时不释放内存，仅标记
     }
 
     void CheckWallBounce(int screenWidth, int screenHeight)
@@ -278,6 +293,10 @@ private:
     Rectangle btnResume;
     Rectangle btnPause;
 
+    float displayFps;     // 这个是真正显示在屏幕上的数值（每秒更新一次）
+    float fpsAccumulator; // 累计时间（秒）
+    int frameCount;       // 累计帧数
+
     PowerUpConfig powerUpCfg;
 
     std::vector<Vector2> lastFrameBallPositions;
@@ -289,7 +308,9 @@ private:
     // 如果不想改结构，可以用一个主球加一个额外球vector，这里为了逻辑清晰改用vector
 
     // 在 Game 类的 private 区域添加
-    std::vector<Particle> particles;
+    static const int MAX_PARTICLES = 1000; // 限制最大数量，防止无限申请
+    Particle particlePool[MAX_PARTICLES];   // 预分配的内存池
+    int activeParticleCount; // 当前活跃粒子数（用于优化遍历）
 
 public:
     GameConfig config;

@@ -22,6 +22,7 @@ float Ball::addspeedx;
 const int StatePacket::MAX_BRICKS;
 const int StatePacket::MAX_BALLS;
 const int StatePacket::MAX_POWERUPS;
+const int Game::MAX_PARTICLES;
 
 void Game::LoadConfig()
 {
@@ -111,7 +112,10 @@ Game::Game(int width, int height)
       isNetworkMode(false), isConnected(false),
       paddle1(nullptr), paddle2(nullptr),
       isLoading(false),
-      loadComplete(false)
+      loadComplete(false),
+      displayFps(0),     // 初始显示为0
+      fpsAccumulator(0), // 时间累计器为0
+      frameCount(0)      // 帧数累计器为0
 {
     LoadConfig();
 
@@ -395,9 +399,18 @@ void Game::CheckCollisions()
                 float angle = (ballPos.x < screenWidth / 2) ? GetRandomValue(-45, 45) : GetRandomValue(135, 225);
                 angle *= 3.14159f / 180.0f;
                 float speed = GetRandomValue(80, 120);
-                Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
+
                 // 使用球的颜色 (RED)
-                particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
+                for (int i = 0; i < MAX_PARTICLES; i++)
+                {
+                    if (!particlePool[i].active)
+                    { // 找到空闲槽
+                        Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
+                        // 直接重置数据，不申请内存
+                        particlePool[i].Reset(spawnPos, vel, 0.3f, RED, 1.5f);
+                        break; // 只发射一个
+                    }
+                }
             }
             bounced = true;
         }
@@ -412,8 +425,16 @@ void Game::CheckCollisions()
             {
                 float angle = GetRandomValue(45, 135) * 3.14159f / 180.0f; // 向下飞溅
                 float speed = GetRandomValue(80, 120);
-                Vector2 vel = {(float)GetRandomValue(-50, 50), speed};
-                particles.emplace_back(spawnPos, vel, 0.3f, RED, 1.5f);
+                for (int i = 0; i < MAX_PARTICLES; i++)
+                {
+                    if (!particlePool[i].active)
+                    { // 找到空闲槽
+                        Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
+                        // 直接重置数据，不申请内存
+                        particlePool[i].Reset(spawnPos, vel, 0.3f, RED, 1.5f);
+                        break; // 只发射一个
+                    }
+                }
             }
             bounced = true;
         }
@@ -432,9 +453,16 @@ void Game::CheckCollisions()
                 {
                     float angle = GetRandomValue(0, 360) * 3.14159f / 180.0f;
                     float speed = GetRandomValue(50, 150);
-                    Vector2 vel = {cosf(angle) * speed, sinf(angle) * speed};
-                    // 使用砖块的绿色 (GREEN)
-                    particles.emplace_back(brickCenter, vel, 0.5f, GREEN, 2.0f);
+                    for (int i = 0; i < MAX_PARTICLES; i++)
+                    {
+                        if (!particlePool[i].active)
+                        { // 找到空闲槽
+                            Vector2 vel = {cosf(angle) * speed, (float)GetRandomValue(-50, 50)};
+                            // 直接重置数据，不申请内存
+                            particlePool[i].Reset(brickCenter, vel, 0.5f, GREEN, 2.0f);
+                            break; // 只发射一个
+                        }
+                    }
                 }
             }
         }
@@ -521,8 +549,17 @@ void Game::CheckCollisions()
                             }
                             brick.SetActive(false);
                             bricksRemaining--;
-
-                            ball->ReverseYSpeed(); // 简单处理
+                            if (ball->GetPosition().x >= brickCenter.x - brick.GetRect().width / 2 && ball->GetPosition().x <= brickCenter.x + brick.GetRect().width / 2)
+                                ball->ReverseYSpeed();
+                            else if (ball->GetPosition().y >= brickCenter.y - brick.GetRect().height / 2 && ball->GetPosition().y <= brickCenter.y + brick.GetRect().height / 2)
+                                ball->ReverseXSpeed();
+                            else
+                            {
+                                if ((ball->GetSpeed().y > 0 && ball->GetPosition().y < brickCenter.y) || (ball->GetSpeed().y < 0 && ball->GetPosition().y > brickCenter.y))
+                                    ball->ReverseYSpeed();
+                                if ((ball->GetSpeed().x > 0 && ball->GetPosition().x < brickCenter.x) || (ball->GetSpeed().x < 0 && ball->GetPosition().x > brickCenter.x))
+                                    ball->ReverseXSpeed();
+                            }
                         }
                     }
                 }
@@ -644,6 +681,21 @@ void Game::UpdateGame()
             BroadcastStatePacket();
         }
 
+        // --- 新增：FPS 计算逻辑 ---
+        float deltaTime = GetFrameTime(); // 获取上一帧耗时
+        fpsAccumulator += deltaTime;      // 累计时间
+        frameCount++;                     // 累计帧数
+
+        // 如果累计时间超过 1 秒
+        if (fpsAccumulator >= 1.0f)
+        {
+            displayFps = (float)frameCount / fpsAccumulator; // 计算平均帧率
+            // 重置计数器，开始计算下一秒
+            fpsAccumulator = 0;
+            frameCount = 0;
+        }
+        // --- 结束新增 ---
+
         // --- 处理增益 Buff 时间 ---
         if (!activeBuff.empty())
         {
@@ -701,18 +753,9 @@ void Game::UpdateGame()
         }
         // 注意：原来的 UpdatePowerUps, CheckCollisions 等调用保持不变，不要放在这里面
 
-        for (auto it = particles.begin(); it != particles.end();)
+        for (int i = 0; i < MAX_PARTICLES; i++)
         {
-            it->Update(GetFrameTime());
-            it->CheckWallBounce(screenWidth, screenHeight); // 关键：让粒子碰壁反弹
-            if (!it->IsAlive())
-            {
-                it = particles.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
+            particlePool[i].Update(GetFrameTime()); // Update 内部会检查 active
         }
         // --- 更新道具 ---
         UpdatePowerUps(GetFrameTime());
@@ -1050,7 +1093,7 @@ void Game::Render()
     {
         DrawText("Loading...", screenWidth / 2 - 50, screenHeight / 2, 40, YELLOW);
     }
-    
+
     EndDrawing();
 }
 
@@ -1159,24 +1202,29 @@ void Game::DrawPlaying()
             brick.Draw();
     }
 
-    for (auto &p : particles)
+    for (int i = 0; i < MAX_PARTICLES; i++)
     {
-        // 使用 DrawCircleGradient 模拟光晕：中心亮，边缘透明
-        // 这里的颜色是基础色，alpha 控制透明度
-        Color colorWithAlpha = p.color;
-        colorWithAlpha.a = (unsigned char)(255 * p.alpha);
+        if (particlePool[i].active)
+        {
+            // 使用 DrawCircleGradient 模拟光晕：中心亮，边缘透明
+            // 这里的颜色是基础色，alpha 控制透明度
+            Color colorWithAlpha = particlePool[i].color;
+            colorWithAlpha.a = (unsigned char)(255 * particlePool[i].alpha);
 
-        // 绘制多层圆圈来模拟光晕
-        // 外层光晕 (大半径，低透明度)
-        DrawCircleV(p.position, p.radius * 3, Fade(colorWithAlpha, 0.1f));
-        DrawCircleV(p.position, p.radius * 2, Fade(colorWithAlpha, 0.3f));
-        // 内核 (小半径，高亮度)
-        DrawCircleV(p.position, p.radius, colorWithAlpha);
+            // 绘制多层圆圈来模拟光晕
+            // 外层光晕 (大半径，低透明度)
+            DrawCircleV(particlePool[i].position, particlePool[i].radius * 3, Fade(colorWithAlpha, 0.1f));
+            DrawCircleV(particlePool[i].position, particlePool[i].radius * 2, Fade(colorWithAlpha, 0.3f));
+            // 内核 (小半径，高亮度)
+            DrawCircleV(particlePool[i].position, particlePool[i].radius, colorWithAlpha);
+        }
     }
 
     // 绘制UI
     DrawText(TextFormat("HP: %i", lives), 60, 10, 20, RED);
     DrawText(TextFormat("Bricks: %i", bricksRemaining), 600, 10, 20, GREEN);
+
+    DrawText(TextFormat("FPS: %2.0f", displayFps), 10, 570, 20, WHITE);
 
     // --- 新增：绘制屏幕左上角的暂停按钮 ---
     DrawRectangleRec(btnPause, GRAY);
