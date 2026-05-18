@@ -75,6 +75,15 @@ void Game::LoadConfig()
         config.brickWidth = data["bricks"]["width"];
         config.brickHeight = data["bricks"]["height"];
         config.brickSpacing = data["bricks"]["spacing"];
+        if (data["bricks"].contains("layout"))
+        {
+            config.customLayout.clear(); // 清空以防万一
+            // 遍历 JSON 数组中的每一行
+            for (auto &row : data["bricks"]["layout"])
+            {
+                config.customLayout.push_back(row.get<std::string>());
+            }
+        }
 
         PowerUpFactory::cfg.spawnChance = data["powerup"]["spawn_chance"];
         PowerUpFactory::cfg.fallSpeed = data["powerup"]["fall_speed"];
@@ -242,17 +251,52 @@ void Game::ResetGame()
     float startX = (screenWidth - (config.brickCols * (config.brickWidth + config.brickSpacing))) / 2;
     float startY = 50;
 
-    for (int row = 0; row < config.brickRows; row++)
+    bool useCustomLayout = !config.customLayout.empty();
+
+    // 如果使用自定义布局，行数以 Layout 为准（防止 JSON 中 rows 设置错误）
+    int actualRows = useCustomLayout ? config.customLayout.size() : config.brickRows;
+    int actualCols = config.brickCols; // 列数通常由砖块宽度决定
+
+    for (int row = 0; row < actualRows; row++)
     {
-        for (int col = 0; col < config.brickCols; col++)
+        // 如果是自定义布局，需要检查当前行字符串长度是否足够
+        int currentRowLength = actualCols;
+        if (useCustomLayout && row < config.customLayout.size())
         {
-            float x = startX + col * (config.brickWidth + config.brickSpacing);
-            float y = startY + row * (config.brickHeight + config.brickSpacing);
-            bricks.emplace_back(x, y, config.brickWidth, config.brickHeight);
+            currentRowLength = config.customLayout[row].length();
+        }
+
+        for (int col = 0; col < currentRowLength && col < actualCols; col++)
+        {
+            bool shouldCreateBrick = false;
+
+            if (useCustomLayout)
+            {
+                // 从自定义布局字符串中读取
+                // 注意：需要确保 row 和 col 在字符串范围内
+                if (row < config.customLayout.size() && col < config.customLayout[row].size())
+                {
+                    char cell = config.customLayout[row][col];
+                    shouldCreateBrick = (cell == '1'); // '1' 表示有砖块
+                }
+                // 如果 col 超出字符串长度，默认为 '0' (无砖块)
+            }
+            else
+            {
+                // 默认整齐排列：全部生成
+                shouldCreateBrick = true;
+            }
+
+            if (shouldCreateBrick)
+            {
+                float x = startX + col * (config.brickWidth + config.brickSpacing);
+                float y = startY + row * (config.brickHeight + config.brickSpacing);
+                bricks.emplace_back(x, y, config.brickWidth, config.brickHeight);
+            }
         }
     }
-
     bricksRemaining = bricks.size();
+
     lives = config.initialLives; // 重置生命值
     activeBuff = "";
 }

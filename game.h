@@ -110,6 +110,7 @@ struct GameConfig
     float brickWidth = 90.0f;
     float brickHeight = 30.0f;
     float brickSpacing = 20.0f;
+    std::vector<std::string> customLayout;
 
     // Network
     int port = 12345;
