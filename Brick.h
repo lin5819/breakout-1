@@ -3,16 +3,19 @@
 
 #include "raylib.h"
 
-class Brick {
+class Brick
+{
 private:
     Rectangle rect;
     bool active;
+
 public:
     Brick(float x, float y, float w, float h);
     void Draw();
     bool IsActive() { return active; }
     Rectangle GetRect() { return rect; }
     void SetActive(bool a) { active = a; }
+    void SetPos(Rectangle a) { rect = a; }
 };
 
 #endif

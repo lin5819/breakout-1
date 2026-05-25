@@ -10,6 +10,8 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
 extern "C"
 {
 #include <enet/enet.h>
@@ -20,6 +22,7 @@ enum GameState
     MENU,
     PLAYING,
     PAUSED,
+    LEVEL_COMPLETE,
     GAMEOVER,
     CONNECTING
 };
@@ -53,13 +56,15 @@ struct Particle
 
     void Update(float deltaTime)
     {
-        if (!active) return;
+        if (!active)
+            return;
         position.x += velocity.x * deltaTime;
         position.y += velocity.y * deltaTime;
         velocity.y += 100.0f * deltaTime; // 模拟重力
         lifeTime -= deltaTime;
         alpha = lifeTime / maxLifeTime; // 随着生命减少而变透明
-        if (lifeTime <= 0) active = false; // 死亡时不释放内存，仅标记
+        if (lifeTime <= 0)
+            active = false; // 死亡时不释放内存，仅标记
     }
 
     void CheckWallBounce(int screenWidth, int screenHeight)
@@ -81,6 +86,37 @@ struct Particle
     }
 
     bool IsAlive() { return lifeTime > 0; }
+};
+
+// --- 关卡数据结构 ---
+struct LevelData
+{
+    // 1. 砖块配置 (对应 JSON 中的 bricks)
+    int brickRows;
+    int brickCols;
+    float brickWidth;
+    float brickHeight;
+    float brickSpacing;
+    std::vector<std::string> customLayout; // 存储关卡布局字符串
+    Color brickColor;                      // 新增：存储该关卡砖块的颜色
+
+    // 2. 游戏基础配置 (对应 JSON 中的 game)
+    int initialLives; // 每关开始时的初始生命值
+
+    // 3. 球的配置 (对应 JSON 中的 ball)
+    float ballStartSpeedY; // 仅 Y 轴速度随关卡变化 (X 轴通常为 0 或随机)
+
+    // 4. 道具配置 (对应 JSON 中的 powerup)
+    int spawnChance; // 道具掉落概率
+
+    // 5. 关卡标题 (对应 JSON 中的 title)
+    std::string title;
+
+    // 构造函数，初始化默认值
+    LevelData()
+        : brickRows(0), brickCols(0), brickWidth(0), brickHeight(0),
+          brickSpacing(0), initialLives(0), ballStartSpeedY(0),
+          spawnChance(0), brickColor(WHITE) {}
 };
 
 struct GameConfig
@@ -116,6 +152,10 @@ struct GameConfig
     int port = 12345;
     std::string hostIp = "127.0.0.1";
     std::string gameMode = "SINGLEPLAYER"; // "SINGLEPLAYER", "MULTIPLAYER_HOST", "MULTIPLAYER_CLIENT"
+
+    int currentLevelIndex;         // 当前关卡索引 (0-based)
+    int totalLevels;               // 总关卡数
+    std::vector<LevelData> levels; // 存储所有关卡的数据
 };
 // 前向声明 (Forward Declarations)，因为我们还没有包含具体的头文件
 // 或者你可以选择在这里 include "Ball.h" "Paddle.h" "Brick.h"
@@ -159,7 +199,7 @@ struct StatePacket
     int bricksRemaining;
     bool gameActive;
     static const int MAX_BRICKS = 100;
-    bool brickStates[MAX_BRICKS];
+    Rectangle brickPositions[MAX_BRICKS];
     int brickCount; // 实际砖块数量，防止越界
     GameState states;
 };
@@ -283,6 +323,14 @@ private:
     mutable std::mutex gameMutex;
     bool isLoading;
     bool loadComplete;
+    bool showNextLevelButton = 0;
+
+    enum MenuState
+    {
+        MAIN,
+        SELECT_LEVEL
+    }; // 菜单的子状态
+    MenuState currentMenuState;
 
     GameState state;
 
@@ -293,6 +341,10 @@ private:
     Rectangle btnExit;
     Rectangle btnResume;
     Rectangle btnPause;
+    Rectangle btnLevel1;
+    Rectangle btnLevel2;
+    Rectangle btnLevel3;
+    Rectangle btnNextLevel; // 通关后的下一关按钮
 
     float displayFps;     // 这个是真正显示在屏幕上的数值（每秒更新一次）
     float fpsAccumulator; // 累计时间（秒）
@@ -310,8 +362,8 @@ private:
 
     // 在 Game 类的 private 区域添加
     static const int MAX_PARTICLES = 1000; // 限制最大数量，防止无限申请
-    Particle particlePool[MAX_PARTICLES];   // 预分配的内存池
-    int activeParticleCount; // 当前活跃粒子数（用于优化遍历）
+    Particle particlePool[MAX_PARTICLES];  // 预分配的内存池
+    int activeParticleCount;               // 当前活跃粒子数（用于优化遍历）
 
 public:
     GameConfig config;
@@ -382,6 +434,12 @@ public:
     void ResetBalls();
 
     void StartLoadingAsync();
+
+    void UpdateLevelSelect();                  // 更新关卡选择界面
+    void DrawLevelSelect();                    // 绘制关卡选择界面
+    void LoadLevelsFromJson(const json &data); // 专门加载关卡数据的函数
+    void StartLevel(int index);                // 开始指定关卡
+    void SetLevel(int index);
 
     Game(int width = 800, int height = 600);
     ~Game(); // 记得释放 new 出来的 ball 和 paddle

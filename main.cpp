@@ -13,7 +13,6 @@ int main()
         game.Render();       // 状态机在此处处理渲染
     }
 
-    game.ShutdownNetwork();
     CloseWindow();
     return 0;
 }

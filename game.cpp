@@ -52,13 +52,17 @@ void Game::LoadConfig()
         config.title = data["window"]["title"];
         config.targetFps = data["window"]["fps"];
 
-        // 读取 Game 配置
-        config.initialLives = data["game"]["initial_lives"];
+        // --- 加载关卡数据 ---
+        LoadLevelsFromJson(data);
+
+        // 如果关卡加载成功，设置总关卡数
+        config.totalLevels = data["levelsnum"];
+        config.currentLevelIndex = 0; // 默认从 0 开始
 
         // 读取 Ball 配置
         config.ballRadius = data["ball"]["radius"];
         config.ballStartSpeedX = data["ball"]["start_speed_x"];
-        config.ballStartSpeedY = data["ball"]["start_speed_y"];
+        //        config.ballStartSpeedY = data["ball"]["start_speed_y"];
 
         Ball::addspeedx = data["ball"]["addspeedx"];
         Ball::maxspeedx = data["ball"]["maxspeedx"];
@@ -69,42 +73,25 @@ void Game::LoadConfig()
         config.paddleHeight = data["paddle"]["height"];
         config.paddleSpeed = data["paddle"]["speed"];
 
-        // 读取 Bricks 配置
-        config.brickRows = data["bricks"]["rows"];
-        config.brickCols = data["bricks"]["cols"];
-        config.brickWidth = data["bricks"]["width"];
-        config.brickHeight = data["bricks"]["height"];
-        config.brickSpacing = data["bricks"]["spacing"];
-        if (data["bricks"].contains("layout"))
-        {
-            config.customLayout.clear(); // 清空以防万一
-            // 遍历 JSON 数组中的每一行
-            for (auto &row : data["bricks"]["layout"])
-            {
-                config.customLayout.push_back(row.get<std::string>());
-            }
-        }
-
-        PowerUpFactory::cfg.spawnChance = data["powerup"]["spawn_chance"];
         PowerUpFactory::cfg.fallSpeed = data["powerup"]["fall_speed"];
         PowerUpFactory::cfg.growDuration = data["powerup"]["duration"]["grow_paddle"];
         PowerUpFactory::cfg.growAnimationTime = data["powerup"]["animation"]["grow_time"];
         PowerUpFactory::cfg.growFactor = data["powerup"]["values"]["grow_factor"];
         PowerUpFactory::cfg.extraLives = data["powerup"]["values"]["extra_lives"];
         PowerUpFactory::cfg.splitCount = data["powerup"]["values"]["split_count"];
-        PowerUpFactory::cfg.size = data["graphics"]["powerups"]["size"];
+        PowerUpFactory::cfg.size = data["powerup"]["graphics"]["size"];
 
         // 加载颜色 (JSON数组转Color)
-        auto &g = data["graphics"]["powerups"]["grow"]["color"];
+        auto &g = data["powerup"]["graphics"]["grow"]["color"];
         PowerUpFactory::cfg.colorGrow = {(unsigned char)g[0], (unsigned char)g[1], (unsigned char)g[2], 255};
-        auto &s = data["graphics"]["powerups"]["split"]["color"];
+        auto &s = data["powerup"]["graphics"]["split"]["color"];
         PowerUpFactory::cfg.colorSplit = {(unsigned char)s[0], (unsigned char)s[1], (unsigned char)s[2], 255};
-        auto &l = data["graphics"]["powerups"]["life"]["color"];
+        auto &l = data["powerup"]["graphics"]["life"]["color"];
         PowerUpFactory::cfg.colorLife = {(unsigned char)l[0], (unsigned char)l[1], (unsigned char)l[2], 255};
 
-        PowerUpFactory::cfg.symbolGrow = data["graphics"]["powerups"]["grow"]["symbol"];
-        PowerUpFactory::cfg.symbolSplit = data["graphics"]["powerups"]["split"]["symbol"];
-        PowerUpFactory::cfg.symbolLife = data["graphics"]["powerups"]["life"]["symbol"];
+        PowerUpFactory::cfg.symbolGrow = data["powerup"]["graphics"]["grow"]["symbol"];
+        PowerUpFactory::cfg.symbolSplit = data["powerup"]["graphics"]["split"]["symbol"];
+        PowerUpFactory::cfg.symbolLife = data["powerup"]["graphics"]["life"]["symbol"];
 
         std::cout << "配置加载成功!" << std::endl;
     }
@@ -116,15 +103,67 @@ void Game::LoadConfig()
     powerUpCfg = PowerUpFactory::cfg;
 }
 
+void Game::LoadLevelsFromJson(const json &data)
+{
+    if (!data.contains("levels"))
+        return;
+
+    for (auto &levelJson : data["levels"])
+    {
+        LevelData level;
+
+        // 加载砖块布局
+        if (levelJson.contains("bricks"))
+        {
+            auto &b = levelJson["bricks"];
+            level.brickRows = b.value("rows", 5);
+            level.brickCols = b.value("cols", 7);
+            level.brickWidth = b.value("width", 90.0f);
+            level.brickHeight = b.value("height", 30.0f);
+            level.brickSpacing = b.value("spacing", 20.0f);
+
+            // 加载自定义布局字符串
+            if (b.contains("layout"))
+            {
+                level.customLayout.clear();
+                for (auto &row : b["layout"])
+                {
+                    level.customLayout.push_back(row.get<std::string>());
+                }
+            }
+        }
+
+        // 加载游戏特定配置
+
+        level.initialLives = levelJson["game"]["initial_lives"];
+
+        // 加载球速配置
+
+        level.ballStartSpeedY = levelJson["ball"]["start_speed_y"];
+
+        // 加载道具掉落率
+
+        level.spawnChance = levelJson["powerup"]["spawn_chance"];
+
+        // 加载关卡标题
+        level.title = levelJson["title"];
+
+        config.levels.push_back(level);
+    }
+}
+
 Game::Game(int width, int height)
     : screenWidth(width), screenHeight(height), running(true), bricksRemaining(0), ball(nullptr), activeBuff(""), buffTimer(0), netHost(nullptr), netPeer(nullptr),
       isNetworkMode(false), isConnected(false),
       paddle1(nullptr), paddle2(nullptr),
       isLoading(false),
       loadComplete(false),
-      displayFps(0),     // 初始显示为0
-      fpsAccumulator(0), // 时间累计器为0
-      frameCount(0)      // 帧数累计器为0
+      displayFps(0),          // 初始显示为0
+      fpsAccumulator(0),      // 时间累计器为0
+      frameCount(0),          // 帧数累计器为0
+      currentMenuState(MAIN), // 初始化为主菜单
+      btnLevel1{0}, btnLevel2{0}, btnLevel3{0}, btnNextLevel{0},
+      showNextLevelButton(0)
 {
     LoadConfig();
 
@@ -134,9 +173,9 @@ Game::Game(int width, int height)
 
     state = MENU;
 
-    btnStart = {(float)screenWidth / 2 - 100, 200, 200, 50};
-    btnExit = {(float)screenWidth / 2 - 100, 300, 200, 50};
-    btnResume = {(float)screenWidth / 2 - 100, 200, 200, 50};
+    btnStart = {(float)screenWidth / 2 - 100, 320, 200, 50};
+    btnExit = {(float)screenWidth / 2 - 100, 500, 200, 50};
+    btnResume = {(float)screenWidth / 2 - 100, 400, 200, 50};
     btnPause = {10, 10, 40, 40}; // 屏幕左上角的暂停按钮
     // 构造函数主要进行参数初始化
     int btnWidth = 200;
@@ -144,9 +183,13 @@ Game::Game(int width, int height)
     int centerX = screenWidth / 2 - btnWidth / 2;
 
     // 垂直排列，间距 20
-    btnSingle = (Rectangle){(float)centerX, 400, (float)btnWidth, (float)btnHeight};
-    btnHost = (Rectangle){(float)centerX, 470, (float)btnWidth, (float)btnHeight};
-    btnClient = (Rectangle){(float)centerX, 540, (float)btnWidth, (float)btnHeight};
+    btnSingle = (Rectangle){(float)centerX, 200, (float)btnWidth, (float)btnHeight};
+    btnHost = (Rectangle){(float)centerX, 270, (float)btnWidth, (float)btnHeight};
+    btnClient = (Rectangle){(float)centerX, 340, (float)btnWidth, (float)btnHeight};
+    btnLevel1 = {(float)centerX, 200, (float)btnWidth, (float)btnHeight};
+    btnLevel2 = {(float)centerX, 270, (float)btnWidth, (float)btnHeight};
+    btnLevel3 = {(float)centerX, 340, (float)btnWidth, (float)btnHeight};
+    btnNextLevel = {(float)centerX, 410, (float)btnWidth, (float)btnHeight};
 }
 
 Game::~Game()
@@ -156,6 +199,7 @@ Game::~Game()
     delete paddle1;
     delete paddle2;
     // vector 会自动释放
+    ShutdownNetwork();
 }
 
 void Game::ShutdownNetwork()
@@ -297,7 +341,6 @@ void Game::ResetGame()
     }
     bricksRemaining = bricks.size();
 
-    lives = config.initialLives; // 重置生命值
     activeBuff = "";
 }
 
@@ -325,12 +368,8 @@ void Game::ProcessInput()
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         {
             Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnStart))
-            {
-                ResetGame(); // <--- 改这里：只重置数据，不碰窗口
-                state = PLAYING;
-            }
-            else if (CheckCollisionPointRec(mouse, btnExit))
+
+            if (CheckCollisionPointRec(mouse, btnExit))
             {
                 running = false;
             }
@@ -349,6 +388,13 @@ void Game::ProcessInput()
             else if (CheckCollisionPointRec(mouse, btnExit))
             {
                 state = MENU;
+                currentMenuState = MAIN;
+                if (!IsSinglePlayer())
+                {
+                    config.gameMode = "SINGLEPLAYER";
+                    ShutdownNetwork();
+                    isConnected = false;
+                }
             }
         }
         if (IsKeyPressed(KEY_ESCAPE))
@@ -360,7 +406,14 @@ void Game::ProcessInput()
         if (IsKeyPressed(KEY_SPACE))
         {
             lives += 100;
-        }
+        } // 作弊：生命值+100
+        if (IsKeyPressed(KEY_E))
+        {
+            for (auto &brick : bricks)
+                brick.SetActive(false);
+            bricksRemaining = 0;
+        } // 作弊：清空砖块
+
         // 游戏中的移动逻辑 (原来的 ProcessInput 内容)
         if (IsSinglePlayer())
         {
@@ -414,6 +467,39 @@ void Game::ProcessInput()
             else if (CheckCollisionPointRec(mouse, btnExit))
             {
                 state = MENU;
+                currentMenuState = MAIN;
+                if (!IsSinglePlayer())
+                {
+                    config.gameMode = "SINGLEPLAYER";
+                    ShutdownNetwork();
+                    isConnected = false;
+                }
+            }
+        }
+        break;
+    case LEVEL_COMPLETE:
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+        {
+            Vector2 mouse = GetMousePosition();
+            if (CheckCollisionPointRec(mouse, btnStart))
+            {
+                ResetGame();
+                state = PLAYING;
+            }
+            else if (CheckCollisionPointRec(mouse, btnExit))
+            {
+                state = MENU;
+                currentMenuState = MAIN;
+                if (!IsSinglePlayer())
+                {
+                    config.gameMode = "SINGLEPLAYER";
+                    ShutdownNetwork();
+                    isConnected = false;
+                }
+            }
+            else if (CheckCollisionPointRec(mouse, btnNextLevel))
+            {
+                StartLevel(config.currentLevelIndex + 1);
             }
         }
         break;
@@ -580,7 +666,7 @@ void Game::CheckCollisions()
                                 brick.GetRect().y + brick.GetRect().height / 2};
 
                             // --- 道具生成逻辑 ---
-                            if (GetRandomValue(1, 100) <= powerUpCfg.spawnChance)
+                            if (GetRandomValue(1, 100) <= PowerUpFactory::cfg.spawnChance)
                             {
                                 std::vector<std::string> types = {"grow", "split", "life"};
                                 std::string type = types[GetRandomValue(0, 2)];
@@ -702,7 +788,7 @@ void Game::UpdateGame()
         return; // 在连接阶段不更新物理逻辑
     }
 
-    if (state == GAMEOVER)
+    if (state == GAMEOVER || state == LEVEL_COMPLETE)
     {
         if (!IsSinglePlayer())
         {
@@ -753,7 +839,17 @@ void Game::UpdateGame()
         CheckCollisions();
         if (bricksRemaining <= 0)
         {
-            state = GAMEOVER;
+            // 检查是否还有下一关
+            if (config.currentLevelIndex + 1 < config.totalLevels)
+            {
+                state = LEVEL_COMPLETE;     // 假设新增了一个状态，或者复用 GAMEOVER 但用标志区分
+                showNextLevelButton = true; // 添加一个成员变量来控制 UI
+            }
+            else
+            {
+                state = GAMEOVER; // 全部通关
+                showNextLevelButton = false;
+            }
         }
 
         // --- 更新所有球 ---
@@ -791,7 +887,9 @@ void Game::UpdateGame()
                 }
                 else
                 {
+
                     state = GAMEOVER;
+                    showNextLevelButton = false;
                 }
             }
         }
@@ -901,13 +999,18 @@ void Game::BroadcastStatePacket()
     packet.bricksRemaining = bricksRemaining;
     packet.gameActive = (state == PLAYING);
 
-    // --- 新增：打包砖块状态 ---
-    packet.brickCount = std::min((int)bricks.size(), StatePacket::MAX_BRICKS);
-    for (int i = 0; i < packet.brickCount; i++)
+    packet.brickCount = 0;
+    // 遍历所有砖块
+    for (int i = 0; i < bricks.size() && packet.brickCount < StatePacket::MAX_BRICKS; i++)
     {
-        packet.brickStates[i] = bricks[i].IsActive(); // true=存在, false=已碎
+        if (bricks[i].IsActive())
+        {
+            // 只有存活的砖块才同步
+            packet.brickPositions[packet.brickCount] = bricks[i].GetRect();
+
+            packet.brickCount++; // 增加存活计数
+        }
     }
-    // 如果砖块少于 MAX_BRICKS，后面的值无所谓；如果多于，会被截断（需确保配置不会超过）
 
     // 广播给所有连接的客户端
     ENetPacket *packetToSend = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
@@ -1002,26 +1105,14 @@ void Game::HandleNetworkPackets()
                         // desiredVelocity 是这一帧应该移动的距离
 
                         // 获取 Ball 内部的速度变量 (需要通过指针操作)
-                        // 假设我们有一个接口 SetSpeed，或者我们直接修改
-                        // 注意：这会覆盖球原本的物理速度，所以只在客户端生效且只在有网络数据时生效
-
-                        // 计算移动比例 (假设网络帧率和本地帧率一致)
-                        // 我们直接把球的位置设为 prevPos，然后给它一个速度飞向 targetPos
-                        // 但是 Ball 类的 Move() 函数是 += speed，所以我们需要设置 speed = desiredVelocity
-
-                        // 这里有一个风险：如果网络卡顿，desiredVelocity 会很大
-                        // 所以我们限制一下最大速度
+                        // 我们限制一下最大速度
                         float maxInterpSpeed = 500.0f; // 限制插值速度，防止瞬间飞过屏幕
                         float len = sqrtf(desiredVelocity.x * desiredVelocity.x + desiredVelocity.y * desiredVelocity.y);
 
                         // 关键：设置球的位置为上一帧位置 (Previous)
                         // 设置球的速度为计算出的速度
-                        // 注意：这会破坏球的物理反弹逻辑，所以仅在客户端且仅在接收网络数据时这样做
                         // 在下一帧，如果没收到包，球会继续按这个速度飞，直到收到新包
-
                         balls[i]->SetPosition(prevPos.x, prevPos.y);
-                        // 这里需要一个 SetSpeed 接口
-                        // 如果没有，我们需要在 Ball.h 中添加
                         balls[i]->SetSpeed(desiredVelocity.x, desiredVelocity.y);
                     }
 
@@ -1060,13 +1151,15 @@ void Game::HandleNetworkPackets()
                     }
                     lives = state->lives;
                     bricksRemaining = state->bricksRemaining;
+                    for (auto &brick : bricks)
+                    {
+                        brick.SetActive(false);
+                    }
                     for (int i = 0; i < bricks.size() && i < state->brickCount; i++)
                     {
-                        // 只有当状态不一致时才更新，防止频繁触发粒子或音效
-                        if (bricks[i].IsActive() != state->brickStates[i])
-                        {
-                            bricks[i].SetActive(state->brickStates[i]);
-                        }
+                        bricks[i].SetActive(true);
+                        // 更新
+                        bricks[i].SetPos(state->brickPositions[i]);
                     }
                 }
             }
@@ -1131,6 +1224,10 @@ void Game::Render()
         DrawPlaying(); // 如果你想在结束画面看到最终状态，否则可以 DrawGameOver()
         DrawGameOver();
         break;
+    case LEVEL_COMPLETE:
+        DrawPlaying(); // 如果你想在结束画面看到最终状态，否则可以 DrawGameOver()
+        DrawGameOver();
+        break;
     }
 
     if (isLoading)
@@ -1147,71 +1244,158 @@ void Game::UpdateMenu()
     {
         Vector2 mousePoint = GetMousePosition();
 
-        if (CheckCollisionPointRec(mousePoint, btnSingle))
+        if (currentMenuState == MAIN)
         {
-            config.gameMode = "SINGLEPLAYER";
-            state = PLAYING;
-            ResetGame(); // 重置游戏状态
-            printf("模式切换：单人模式\n");
+            // 主菜单逻辑
+            if (CheckCollisionPointRec(mousePoint, btnSingle))
+            {
+                config.gameMode = "SINGLEPLAYER";
+                currentMenuState = SELECT_LEVEL;
+                printf("模式切换：单人模式\n");
+            }
+            // 2. 检测是否点击“创建主机”
+            else if (CheckCollisionPointRec(mousePoint, btnHost))
+            {
+                config.gameMode = "MULTIPLAYER_HOST";
+                currentMenuState = SELECT_LEVEL;
+            }
+            // 3. 检测是否点击“加入游戏”
+            else if (CheckCollisionPointRec(mousePoint, btnClient))
+            {
+                config.gameMode = "MULTIPLAYER_CLIENT";
+                state = CONNECTING; // 进入连接中状态
+                InitNetwork();      // 初始化 ENet 客户端
+                printf("模式切换：尝试连接主机...\n");
+            }
         }
-        // 2. 检测是否点击“创建主机”
-        else if (CheckCollisionPointRec(mousePoint, btnHost))
+        else if (currentMenuState == SELECT_LEVEL)
         {
-            config.gameMode = "MULTIPLAYER_HOST";
-            state = CONNECTING; // 进入连接中状态
-            InitNetwork();      // 初始化 ENet 主机
-            printf("模式切换：创建主机 (等待连接...)\n");
-        }
-        // 3. 检测是否点击“加入游戏”
-        else if (CheckCollisionPointRec(mousePoint, btnClient))
-        {
-            config.gameMode = "MULTIPLAYER_CLIENT";
-            state = CONNECTING; // 进入连接中状态
-            InitNetwork();      // 初始化 ENet 客户端
-            printf("模式切换：尝试连接主机...\n");
+            // 关卡选择逻辑
+            if (CheckCollisionPointRec(mousePoint, btnLevel1) && config.levels.size() > 0)
+            {
+                if (config.gameMode == "MULTIPLAYER_HOST")
+                    SetLevel(0);
+                else
+                    StartLevel(0);
+            }
+            else if (CheckCollisionPointRec(mousePoint, btnLevel2) && config.levels.size() > 1)
+            {
+                if (config.gameMode == "MULTIPLAYER_HOST")
+                    SetLevel(1);
+                else
+                    StartLevel(1);
+            }
+            else if (CheckCollisionPointRec(mousePoint, btnLevel3) && config.levels.size() > 2)
+            {
+                if (config.gameMode == "MULTIPLAYER_HOST")
+                    SetLevel(2);
+                else
+                    StartLevel(2);
+            }
         }
     }
 }
 
 void Game::DrawMenu()
 {
-    // 绘制标题
-    DrawText("BRICK BREAKER", 250, 100, 40, DARKBLUE);
+    if (currentMenuState == MAIN)
+    {
+        // 绘制标题
+        DrawText("BRICK BREAKER", 250, 100, 40, DARKBLUE);
 
-    // 绘制按钮
-    DrawRectangleRec(btnStart, LIGHTGRAY);
-    DrawText("START GAME", 320, 215, 20, DARKBLUE);
+        DrawRectangleRec(btnExit, RED);
+        DrawRectangleLinesEx(btnExit, 2, RAYWHITE);
+        DrawText("EXIT", btnExit.x + btnExit.width / 2 - MeasureText("EXIT", 20) / 2, btnExit.y + 15, 20, RAYWHITE);
 
-    DrawRectangleRec(btnExit, PINK);
-    DrawText("EXIT", 370, 315, 20, DARKBLUE);
+        // 单人模式 (绿色)
+        DrawRectangleRec(btnSingle, GREEN);
+        DrawRectangleLinesEx(btnSingle, 2, RAYWHITE);
 
-    // 单人模式 (绿色)
-    DrawRectangleRec(btnSingle, GREEN);
-    DrawRectangleLinesEx(btnSingle, 2, RAYWHITE);
+        // 创建主机 (蓝色)
+        DrawRectangleRec(btnHost, BLUE);
+        DrawRectangleLinesEx(btnHost, 2, RAYWHITE);
 
-    // 创建主机 (蓝色)
-    DrawRectangleRec(btnHost, BLUE);
-    DrawRectangleLinesEx(btnHost, 2, RAYWHITE);
+        // 加入游戏 (橙色)
+        DrawRectangleRec(btnClient, ORANGE);
+        DrawRectangleLinesEx(btnClient, 2, RAYWHITE);
 
-    // 加入游戏 (橙色)
-    DrawRectangleRec(btnClient, ORANGE);
-    DrawRectangleLinesEx(btnClient, 2, RAYWHITE);
+        // 3. 绘制按钮文字 (居中计算)
+        // 单人
+        const char *textSingle = "SINGLE PLAYER";
+        DrawText(textSingle, btnSingle.x + btnSingle.width / 2 - MeasureText(textSingle, 20) / 2, btnSingle.y + 15, 20, RAYWHITE);
 
-    // 3. 绘制按钮文字 (居中计算)
-    // 单人
-    const char *textSingle = "SINGLE PLAYER";
-    DrawText(textSingle, btnSingle.x + btnSingle.width / 2 - MeasureText(textSingle, 20) / 2, btnSingle.y + 15, 20, RAYWHITE);
+        // 主机
+        const char *textHost = "HOST GAME";
+        DrawText(textHost, btnHost.x + btnHost.width / 2 - MeasureText(textHost, 20) / 2, btnHost.y + 15, 20, RAYWHITE);
 
-    // 主机
-    const char *textHost = "HOST GAME";
-    DrawText(textHost, btnHost.x + btnHost.width / 2 - MeasureText(textHost, 20) / 2, btnHost.y + 15, 20, RAYWHITE);
+        // 客户端
+        const char *textClient = "JOIN GAME";
+        DrawText(textClient, btnClient.x + btnClient.width / 2 - MeasureText(textClient, 20) / 2, btnClient.y + 15, 20, RAYWHITE);
 
-    // 客户端
-    const char *textClient = "JOIN GAME";
-    DrawText(textClient, btnClient.x + btnClient.width / 2 - MeasureText(textClient, 20) / 2, btnClient.y + 15, 20, RAYWHITE);
+        // 4. 底部提示
+        DrawText("Config loaded from config.json", 10, screenHeight - 20, 10, GRAY);
+    }
+    else
+    {
+        // 绘制关卡选择界面
+        DrawText("SELECT LEVEL", 300, 100, 40, DARKBLUE);
 
-    // 4. 底部提示
-    DrawText("Config loaded from config.json", 10, screenHeight - 20, 10, GRAY);
+        // 绘制关卡按钮 (根据实际关卡数量启用/禁用)
+        DrawRectangleRec(btnLevel1, config.levels.size() > 0 ? GREEN : GRAY);
+        DrawRectangleLinesEx(btnLevel1, 2, RAYWHITE);
+        DrawText(config.levels[0].title.c_str(),
+                 btnLevel1.x + 10, btnLevel1.y + 15, 20, RAYWHITE);
+
+        DrawRectangleRec(btnLevel2, config.levels.size() > 1 ? GREEN : GRAY);
+        DrawRectangleLinesEx(btnLevel2, 2, RAYWHITE);
+        DrawText(config.levels[1].title.c_str(),
+                 btnLevel2.x + 10, btnLevel2.y + 15, 20, RAYWHITE);
+
+        DrawRectangleRec(btnLevel3, config.levels.size() > 2 ? GREEN : GRAY);
+        DrawRectangleLinesEx(btnLevel3, 2, RAYWHITE);
+        DrawText(config.levels[2].title.c_str(),
+                 btnLevel3.x + 10, btnLevel3.y + 15, 20, RAYWHITE);
+    }
+}
+
+void Game::StartLevel(int index)
+{
+    SetLevel(index);
+    ResetGame();
+    state = PLAYING;
+}
+void Game::SetLevel(int index)
+{
+    if (index < 0 || index >= config.levels.size())
+        return;
+
+    if ((config.gameMode == "MULTIPLAYER_HOST") && (!isConnected))
+    {
+        state = CONNECTING; // 进入连接中状态
+        InitNetwork();      // 初始化 ENet 主机
+        printf("模式切换：创建主机 (等待连接...)\n");
+    }
+
+    config.currentLevelIndex = index;
+
+    // 应用当前关卡的配置
+    auto &level = config.levels[index];
+
+    // 重置球速
+    config.ballStartSpeedY = level.ballStartSpeedY;
+    // 重置生命值
+    lives = level.initialLives;
+
+    // 重置道具掉落率 (需要在 PowerUpFactory 中设置)
+    PowerUpFactory::cfg.spawnChance = level.spawnChance;
+
+    // 重置砖块布局
+    config.brickRows = level.brickRows;
+    config.brickCols = level.brickCols;
+    config.brickWidth = level.brickWidth;
+    config.brickHeight = level.brickHeight;
+    config.brickSpacing = level.brickSpacing;
+    config.customLayout = level.customLayout;
 }
 
 void Game::DrawPlaying()
@@ -1271,8 +1455,11 @@ void Game::DrawPlaying()
     DrawText(TextFormat("FPS: %2.0f", displayFps), 10, 570, 20, WHITE);
 
     // --- 新增：绘制屏幕左上角的暂停按钮 ---
-    DrawRectangleRec(btnPause, GRAY);
-    DrawText("| |", 20, 18, 30, WHITE);
+    if (IsSinglePlayer() || IsHost())
+    {
+        DrawRectangleRec(btnPause, GRAY);
+        DrawText("| |", 20, 18, 30, WHITE);
+    }
 
     // 网络状态提示
     if (!IsSinglePlayer())
@@ -1287,12 +1474,16 @@ void Game::DrawPaused()
     DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.5f));
 
     // 恢复按钮
-    DrawRectangleRec(btnResume, YELLOW);
-    DrawText("RESUME", 330, 215, 20, DARKBLUE);
-
+    if (IsSinglePlayer() || IsHost())
+    {
+        DrawRectangleRec(btnResume, ORANGE);
+        DrawRectangleLinesEx(btnResume, 2, RAYWHITE);
+        DrawText("RESUME", btnResume.x + btnResume.width / 2 - MeasureText("RESUME", 20) / 2, btnResume.y + 15, 20, RAYWHITE);
+    }
     // 退出到菜单按钮
     DrawRectangleRec(btnExit, ORANGE);
-    DrawText("MAIN MENU", 310, 315, 20, DARKBLUE);
+    DrawRectangleLinesEx(btnExit, 2, RAYWHITE);
+    DrawText("MAIN MENU", btnExit.x + btnExit.width / 2 - MeasureText("MAIN MENU", 20) / 2, btnExit.y + 15, 20, RAYWHITE);
 }
 
 void Game::DrawGameOver()
@@ -1308,14 +1499,25 @@ void Game::DrawGameOver()
     {
         DrawText("YOU WIN!", 300, 150, 50, GOLD);
     }
-
-    // 重新开始
-    DrawRectangleRec(btnStart, GREEN);
-    DrawText("RESTART", 340, 265, 20, DARKBLUE);
-
     // 返回菜单
     DrawRectangleRec(btnExit, BLUE);
-    DrawText("MENU", 370, 365, 20, DARKBLUE);
+    DrawRectangleLinesEx(btnExit, 2, RAYWHITE);
+    DrawText("MAIN MENU", btnExit.x + btnExit.width / 2 - MeasureText("MAIN MENU", 20) / 2, btnExit.y + 15, 20, RAYWHITE);
+
+    if (IsSinglePlayer() || IsHost())
+    {
+        // 重新开始
+        DrawRectangleRec(btnStart, GREEN);
+        DrawRectangleLinesEx(btnStart, 2, RAYWHITE);
+        DrawText("RESTART", btnStart.x + btnStart.width / 2 - MeasureText("RESTART", 20) / 2, btnStart.y + 15, 20, RAYWHITE);
+
+        if (showNextLevelButton)
+        {
+            DrawRectangleRec(btnNextLevel, ORANGE);
+            DrawRectangleLinesEx(btnNextLevel, 2, RAYWHITE);
+            DrawText("NEXT LEVEL", btnNextLevel.x + btnNextLevel.width / 2 - MeasureText("NEXT LEVEL", 20) / 2, btnNextLevel.y + 15, 20, RAYWHITE);
+        }
+    }
 }
 
 // File: game.cpp

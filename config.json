@@ -1,21 +1,113 @@
 {
-  "network": {
-    "port": 12345,
-    "host_ip": "127.0.0.1",
-    "game_mode": "SINGLEPLAYER"
-  },
+  "levels": [
+    {
+      "title": "level 1",
+      "bricks": {
+        "rows": 3,
+        "cols": 7,
+        "layout": [
+          "0011100",
+          "0111110",
+          "1111111"
+        ],
+        "width": 90,
+        "height": 30,
+        "spacing": 20,
+        "color": "GREEN"
+      },
+      "game": {
+        "initial_lives": 3,
+        "victory_bricks_threshold": 0
+      },
+      "ball": {
+        "start_speed_y": 2
+      },
+      "powerup": {
+        "spawn_chance": 10
+      }
+    },
+    {
+      "title": "level 2",
+      "bricks": {
+        "rows": 4,
+        "cols": 8,
+        "layout": [
+          "11111111",
+          "10000001",
+          "10011001",
+          "11111111"
+        ],
+        "width": 80,
+        "height": 25,
+        "spacing": 15,
+        "color": "GREEN"
+      },
+      "game": {
+        "initial_lives": 2,
+        "victory_bricks_threshold": 0
+      },
+      "ball": {
+        "start_speed_y": 3
+      },
+      "powerup": {
+        "spawn_chance": 30
+      }
+    },
+    {
+      "title": "level 3",
+      "bricks": {
+        "rows": 5,
+        "cols": 10,
+        "layout": [
+          "1111111111",
+          "1100000011",
+          "1001111001",
+          "1001001001",
+          "1111111111"
+        ],
+        "width": 70,
+        "height": 20,
+        "spacing": 10,
+        "color": "GREEN"
+      },
+      "game": {
+        "initial_lives": 1,
+        "victory_bricks_threshold": 0
+      },
+      "ball": {
+        "start_speed_y": 4
+      },
+      "powerup": {
+        "spawn_chance": 50
+      }
+    }
+  ],
   "window": {
     "width": 800,
     "height": 600,
     "title": "Configurable Brick Breaker",
     "fps": 60
   },
-  "game": {
-    "initial_lives": 3,
-    "victory_bricks_threshold": 0
+  "levelsnum": 3,
+  "network": {
+    "port": 12345,
+    "host_ip": "127.0.0.1",
+    "game_mode": "SINGLEPLAYER"
+  },
+  "paddle": {
+    "width": 100,
+    "height": 20,
+    "speed": 5,
+    "color": "BLUE"
+  },
+  "ball": {
+    "radius": 10,
+    "start_speed_x": 0,
+    "addspeedx": 2.0,
+    "maxspeedx": 5.0,
+    "randspeedx": 1.0
   },
   "powerup": {
-    "spawn_chance": 20,
     "fall_speed": 50,
     "duration": {
       "grow_paddle": 10
@@ -27,40 +119,8 @@
       "grow_factor": 2.0,
       "extra_lives": 2,
       "split_count": 1
-    }
-  },
-  "ball": {
-    "radius": 10,
-    "start_speed_x": 0,
-    "start_speed_y": 3,
-    "color": "RED",
-    "addspeedx": 2.0,
-    "maxspeedx": 5.0,
-    "randspeedx": 1.0
-  },
-  "paddle": {
-    "width": 100,
-    "height": 20,
-    "speed": 5,
-    "color": "BLUE"
-  },
-  "bricks": {
-    "rows": 5,
-    "cols": 7,
-    "layout": [
-      "0011100",
-      "0111110",
-      "1111111",
-      "1101101",
-      "1001001"
-    ],
-    "width": 90,
-    "height": 30,
-    "spacing": 20,
-    "color": "GREEN"
-  },
-  "graphics": {
-    "powerups": {
+    },
+    "graphics": {
       "size": 15,
       "grow": {
         "color": [
