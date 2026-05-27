@@ -23,6 +23,7 @@ const int StatePacket::MAX_BRICKS;
 const int StatePacket::MAX_BALLS;
 const int StatePacket::MAX_POWERUPS;
 const int Game::MAX_PARTICLES;
+const char *Game::SAVE_FILE_NAME = "savegame.dat";
 
 void Game::LoadConfig()
 {
@@ -163,7 +164,9 @@ Game::Game(int width, int height)
       frameCount(0),          // 帧数累计器为0
       currentMenuState(MAIN), // 初始化为主菜单
       btnLevel1{0}, btnLevel2{0}, btnLevel3{0}, btnNextLevel{0},
-      showNextLevelButton(0)
+      showNextLevelButton(0),
+      btnSave{0},
+      btnLoad{0}
 {
     LoadConfig();
 
@@ -177,6 +180,8 @@ Game::Game(int width, int height)
     btnExit = {(float)screenWidth / 2 - 100, 500, 200, 50};
     btnResume = {(float)screenWidth / 2 - 100, 400, 200, 50};
     btnPause = {10, 10, 40, 40}; // 屏幕左上角的暂停按钮
+    btnSave = {(float)screenWidth - 120, 10, 100, 30};
+
     // 构造函数主要进行参数初始化
     int btnWidth = 200;
     int btnHeight = 50;
@@ -189,12 +194,12 @@ Game::Game(int width, int height)
     btnLevel1 = {(float)centerX, 200, (float)btnWidth, (float)btnHeight};
     btnLevel2 = {(float)centerX, 270, (float)btnWidth, (float)btnHeight};
     btnLevel3 = {(float)centerX, 340, (float)btnWidth, (float)btnHeight};
+    btnLoad = {(float)centerX, 410, (float)btnWidth, (float)btnHeight};
     btnNextLevel = {(float)centerX, 410, (float)btnWidth, (float)btnHeight};
 }
 
 Game::~Game()
 {
-    //    ShutdownNetwork();
     delete ball;
     delete paddle1;
     delete paddle2;
@@ -369,7 +374,7 @@ void Game::ProcessInput()
         {
             Vector2 mouse = GetMousePosition();
 
-            if (CheckCollisionPointRec(mouse, btnExit))
+            if (CheckCollisionPointRec(mouse, btnExit) && currentMenuState == MAIN)
             {
                 running = false;
             }
@@ -381,7 +386,7 @@ void Game::ProcessInput()
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         {
             Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnResume))
+            if (CheckCollisionPointRec(mouse, btnResume) && (IsSinglePlayer() || IsHost()))
             {
                 state = PLAYING;
             }
@@ -395,6 +400,10 @@ void Game::ProcessInput()
                     ShutdownNetwork();
                     isConnected = false;
                 }
+            }
+            else if (IsSinglePlayer() || CheckCollisionPointRec(mouse, btnSave))
+            {
+                SaveGame(); // 调用存档函数
             }
         }
         if (IsKeyPressed(KEY_ESCAPE))
@@ -448,7 +457,7 @@ void Game::ProcessInput()
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         {
             Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnPause))
+            if (CheckCollisionPointRec(mouse, btnPause) && (IsSinglePlayer() || IsHost()))
             { // 检测是否点击了 btnPause
                 state = PAUSED;
             }
@@ -459,10 +468,9 @@ void Game::ProcessInput()
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         {
             Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnStart))
+            if (CheckCollisionPointRec(mouse, btnStart) && (IsSinglePlayer() || IsHost()))
             {
-                ResetGame();
-                state = PLAYING;
+                StartLevel(config.currentLevelIndex);
             }
             else if (CheckCollisionPointRec(mouse, btnExit))
             {
@@ -481,10 +489,9 @@ void Game::ProcessInput()
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         {
             Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnStart))
+            if (CheckCollisionPointRec(mouse, btnStart) && (IsSinglePlayer() || IsHost()))
             {
-                ResetGame();
-                state = PLAYING;
+                StartLevel(config.currentLevelIndex);
             }
             else if (CheckCollisionPointRec(mouse, btnExit))
             {
@@ -497,7 +504,7 @@ void Game::ProcessInput()
                     isConnected = false;
                 }
             }
-            else if (CheckCollisionPointRec(mouse, btnNextLevel))
+            else if (CheckCollisionPointRec(mouse, btnNextLevel) && (IsSinglePlayer() || IsHost()))
             {
                 StartLevel(config.currentLevelIndex + 1);
             }
@@ -773,22 +780,20 @@ void Game::UpdateGame()
         // 如果是客户端，连接成功后进入游戏
         if (IsClient() && isConnected)
         {
-            state = PLAYING;
-            ResetGame(); // 客户端也需要初始化对象以便接收状态
+            StartLevel(config.currentLevelIndex);
             printf("已连接到主机，进入游戏！\n");
         }
         // 如果是主机，一旦有连接（在 HandleNetworkPackets 中设置 isConnected = true），也可以视为开始
         // 这里简单处理：主机点击后即视为开始，或者你可以等待一个客户端
         if (IsHost() && isConnected)
         {
-            state = PLAYING;
-            ResetGame();
+            StartLevel(config.currentLevelIndex);
             printf("客户端已连接，游戏开始！\n");
         }
         return; // 在连接阶段不更新物理逻辑
     }
 
-    if (state == GAMEOVER || state == LEVEL_COMPLETE)
+    if (state == GAMEOVER || state == LEVEL_COMPLETE || state == PAUSED)
     {
         if (!IsSinglePlayer())
         {
@@ -1151,6 +1156,10 @@ void Game::HandleNetworkPackets()
                     }
                     lives = state->lives;
                     bricksRemaining = state->bricksRemaining;
+                    if (bricks.size() != state->brickCount)
+                    {
+                        bricks.resize(state->brickCount);
+                    }
                     for (auto &brick : bricks)
                     {
                         brick.SetActive(false);
@@ -1292,6 +1301,10 @@ void Game::UpdateMenu()
                 else
                     StartLevel(2);
             }
+            else if (CheckCollisionPointRec(mousePoint, btnLoad) && IsSinglePlayer())
+            {
+                LoadGame(); // 调用读档函数
+            }
         }
     }
 }
@@ -1355,6 +1368,14 @@ void Game::DrawMenu()
         DrawRectangleLinesEx(btnLevel3, 2, RAYWHITE);
         DrawText(config.levels[2].title.c_str(),
                  btnLevel3.x + 10, btnLevel3.y + 15, 20, RAYWHITE);
+
+        if (IsSinglePlayer())
+        {
+            DrawRectangleRec(btnLoad, ORANGE);
+            DrawRectangleLinesEx(btnLoad, 2, RAYWHITE);
+            DrawText("LOAD GAME", btnLoad.x + btnLoad.width / 2 - MeasureText("LOAD GAME", 20) / 2,
+                     btnLoad.y + 12, 20, RAYWHITE);
+        }
     }
 }
 
@@ -1455,6 +1476,7 @@ void Game::DrawPlaying()
     DrawText(TextFormat("FPS: %2.0f", displayFps), 10, 570, 20, WHITE);
 
     // --- 新增：绘制屏幕左上角的暂停按钮 ---
+
     if (IsSinglePlayer() || IsHost())
     {
         DrawRectangleRec(btnPause, GRAY);
@@ -1473,12 +1495,20 @@ void Game::DrawPaused()
     // 半透明遮罩
     DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.5f));
 
-    // 恢复按钮
     if (IsSinglePlayer() || IsHost())
     {
+        // 恢复按钮
         DrawRectangleRec(btnResume, ORANGE);
         DrawRectangleLinesEx(btnResume, 2, RAYWHITE);
         DrawText("RESUME", btnResume.x + btnResume.width / 2 - MeasureText("RESUME", 20) / 2, btnResume.y + 15, 20, RAYWHITE);
+    }
+
+    if (IsSinglePlayer())
+    {
+        // 保存按钮
+        DrawRectangleRec(btnSave, ORANGE);
+        DrawRectangleLinesEx(btnSave, 2, RAYWHITE);
+        DrawText("SAVE", btnSave.x + btnSave.width / 2 - MeasureText("SAVE", 20) / 2, btnSave.y + 15, 20, RAYWHITE);
     }
     // 退出到菜单按钮
     DrawRectangleRec(btnExit, ORANGE);
@@ -1662,4 +1692,167 @@ void Game::StartLoadingAsync()
     // 3. 更新本地状态
     isLoading = true;
     loadComplete = false; // 重置状态
+}
+
+// 将游戏状态写入文件
+void Game::SaveGame()
+{
+    StatePacket packet = {};
+
+    // --- 填充数据包 ---
+    // 1. 球的数据
+    packet.ballCount = std::min((int)balls.size(), StatePacket::MAX_BALLS);
+    for (int i = 0; i < packet.ballCount; i++)
+    {
+        Vector2 pos = balls[i]->GetPosition();
+        packet.ballX_Current[i] = pos.x;
+        packet.ballY_Current[i] = pos.y;
+        Vector2 speed = balls[i]->GetSpeed();
+        packet.ballSpeedX[i] = speed.x;
+        packet.ballSpeedY[i] = speed.y;
+    }
+
+    // 2. 道具数据
+    packet.powerupCount = std::min((int)activePowerUps.size(), StatePacket::MAX_POWERUPS);
+    for (int i = 0; i < packet.powerupCount; i++)
+    {
+        packet.poweruppositions[i] = activePowerUps[i]->GetPosition();
+        packet.poweruptypes[i] = activePowerUps[i]->GetTypeNum();
+    }
+
+    // 3. 挡板数据
+    if (paddle1)
+        packet.paddle1X = paddle1->GetRect();
+    if (paddle2)
+        packet.paddle2X = paddle2->GetRect();
+
+    // 4. 游戏全局数据
+    packet.lives = lives;
+    packet.bricksRemaining = bricksRemaining;
+    packet.states = this->state;
+    packet.gameActive = (state == PLAYING);
+
+    // 5. 砖块数据 (只保存存活的)
+    packet.brickCount = 0;
+    for (int i = 0; i < bricks.size() && packet.brickCount < StatePacket::MAX_BRICKS; i++)
+    {
+        if (bricks[i].IsActive())
+        {
+            packet.brickPositions[packet.brickCount] = bricks[i].GetRect();
+            packet.brickCount++;
+        }
+    }
+
+    packet.LoadLevels = config.currentLevelIndex;
+
+    // --- 写入文件 ---
+    // 使用二进制模式写入整个结构体
+    std::ofstream outFile(SAVE_FILE_NAME, std::ios::binary);
+    if (outFile.is_open())
+    {
+        outFile.write(reinterpret_cast<const char *>(&packet), sizeof(packet));
+        outFile.close();
+        printf("游戏已保存到 %s\n", SAVE_FILE_NAME);
+    }
+    else
+    {
+        printf("错误：无法打开存档文件进行写入！\n");
+    }
+}
+
+// 应用数据包中的状态到当前游戏
+void Game::ApplyStatePacket(const StatePacket &packet)
+{
+    config.currentLevelIndex = packet.LoadLevels;
+    SetLevel(config.currentLevelIndex);
+
+    // 1. 恢复球
+    while (balls.size() < packet.ballCount)
+    {
+        balls.push_back(new Ball({0, 0}, {0, 0}, config.ballRadius));
+    }
+    while (balls.size() > packet.ballCount)
+    {
+        delete balls.back();
+        balls.pop_back();
+    }
+    for (int i = 0; i < packet.ballCount && i < balls.size(); i++)
+    {
+        balls[i]->SetPosition(packet.ballX_Current[i], packet.ballY_Current[i]);
+        balls[i]->SetSpeed(packet.ballSpeedX[i], packet.ballSpeedY[i]);
+    }
+
+    // 2. 恢复道具
+    activePowerUps.clear();
+    for (int i = 0; i < packet.powerupCount; i++)
+    {
+        PowerUp *pp = nullptr;
+        if (packet.poweruptypes[i] == 0)
+            pp = PowerUpFactory::CreatePowerUp("grow", packet.poweruppositions[i]);
+        else if (packet.poweruptypes[i] == 1)
+            pp = PowerUpFactory::CreatePowerUp("split", packet.poweruppositions[i]);
+        else if (packet.poweruptypes[i] == 2)
+            pp = PowerUpFactory::CreatePowerUp("life", packet.poweruppositions[i]);
+        if (pp)
+            activePowerUps.push_back(pp);
+    }
+
+    // 3. 恢复挡板
+    if (paddle1)
+        paddle1->SetRect(packet.paddle1X);
+    if (paddle2)
+        paddle2->SetRect(packet.paddle2X);
+
+    // 4. 恢复游戏数据
+    lives = packet.lives;
+    bricksRemaining = packet.bricksRemaining;
+    this->state = packet.states;
+
+    // 5. 恢复砖块状态
+    // 同步数量
+    if (bricks.size() != packet.brickCount)
+    {
+        bricks.resize(packet.brickCount);
+    }
+    // 同步状态
+    for (int i = 0; i < bricks.size() && i < packet.brickCount; i++)
+    {
+        bricks[i].SetPos(packet.brickPositions[i]);
+        bricks[i].SetActive(true);
+    }
+}
+
+// 从文件读取游戏状态
+void Game::LoadGame()
+{
+    std::ifstream inFile(SAVE_FILE_NAME, std::ios::binary);
+    if (inFile.is_open())
+    {
+        StatePacket packet = {};
+        // 读取数据
+        inFile.read(reinterpret_cast<char *>(&packet), sizeof(packet));
+        inFile.close();
+
+        // 检查读取是否成功且有有效数据
+        if (inFile.gcount() == sizeof(packet))
+        {
+            // 应用状态
+            ApplyStatePacket(packet);
+
+            // 如果游戏处于非游玩状态（如菜单），加载后直接进入游玩
+            if (state != PLAYING)
+            {
+                state = PLAYING;
+            }
+            printf("游戏已从 %s 加载\n", SAVE_FILE_NAME);
+        }
+        else
+        {
+            printf("错误：存档文件数据不完整\n");
+        }
+    }
+    else
+    {
+        printf("错误：无法打开存档文件进行读取！\n");
+    }
 }

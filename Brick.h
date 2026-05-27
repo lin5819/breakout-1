@@ -10,6 +10,7 @@ private:
     bool active;
 
 public:
+    Brick() = default;
     Brick(float x, float y, float w, float h);
     void Draw();
     bool IsActive() { return active; }

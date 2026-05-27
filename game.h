@@ -185,6 +185,8 @@ struct StatePacket
     float ballY_Current[MAX_BALLS];
     float ballX_Previous[MAX_BALLS];
     float ballY_Previous[MAX_BALLS];
+    float ballSpeedX[MAX_BALLS];
+    float ballSpeedY[MAX_BALLS];
     // 或者直接传输数量，客户端根据数量渲染前 N 个
     int ballCount; // 新增：当前实际存在的球数量
 
@@ -202,6 +204,7 @@ struct StatePacket
     Rectangle brickPositions[MAX_BRICKS];
     int brickCount; // 实际砖块数量，防止越界
     GameState states;
+    int LoadLevels;
 };
 
 struct PowerUpConfig
@@ -345,6 +348,8 @@ private:
     Rectangle btnLevel2;
     Rectangle btnLevel3;
     Rectangle btnNextLevel; // 通关后的下一关按钮
+    Rectangle btnSave;      // 暂停菜单中的保存按钮
+    Rectangle btnLoad;      // 关卡选择界面中的加载按钮
 
     float displayFps;     // 这个是真正显示在屏幕上的数值（每秒更新一次）
     float fpsAccumulator; // 累计时间（秒）
@@ -355,10 +360,11 @@ private:
     std::vector<Vector2> lastFrameBallPositions;
 
     // 新增道具管理
+    static const char *SAVE_FILE_NAME;    // 存档文件名
 
-    // 修改球的管理，以支持多球
-    // 将单个 Ball* 改为 vector，方便管理主球和分裂球
-    // 如果不想改结构，可以用一个主球加一个额外球vector，这里为了逻辑清晰改用vector
+    void SaveGame();    // 将当前游戏状态写入文件
+    void LoadGame();    // 从文件读取游戏状态
+    void ApplyStatePacket(const StatePacket& packet); // 辅助函数：应用数据包中的状态
 
     // 在 Game 类的 private 区域添加
     static const int MAX_PARTICLES = 1000; // 限制最大数量，防止无限申请
